@@ -15,7 +15,7 @@ struct VOSystem {
     cv::Mat t_cw;                            // current translation
 
     std::vector<cv::Point3f> map_points;      // 3D map (world frame)
-    cv::Mat map_descs;                        // descriptors for map points
+    cv::Mat map_descriptors;                  // descriptors for map points
 
     cv::Mat prev_img;
     std::vector<cv::KeyPoint> prev_kp;

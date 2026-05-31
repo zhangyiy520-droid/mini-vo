@@ -15,7 +15,7 @@ namespace mini_vo {
  *   5. Median-depth-based outlier filtering
  *   6. Reprojection error check
  *
- * On success: populates vo.R_cw / vo.t_cw / vo.map_points / vo.map_descs
+ * On success: populates vo.R_cw / vo.t_cw / vo.map_points / vo.map_descriptors
  *             and sets prev_* / kf_* state for the next tracking frame.
  */
 bool initialize(VOSystem& vo,

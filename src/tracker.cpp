@@ -13,11 +13,11 @@ bool track(VOSystem& vo, const cv::Mat& img,
 {
     // --- 1. match current → previous (ratio test) ---
     cv::BFMatcher matcher(cv::NORM_HAMMING);
-    std::vector<std::vector<cv::DMatch>> knn;
-    matcher.knnMatch(desc, vo.prev_desc, knn, 2);
+    std::vector<std::vector<cv::DMatch>> knn_matches;
+    matcher.knnMatch(desc, vo.prev_desc, knn_matches, 2);
 
     std::vector<cv::Point2f> pts_cur, pts_ref;
-    for (const auto& m : knn) {
+    for (const auto& m : knn_matches) {
         if (m[0].distance < 0.8f * m[1].distance) {
             int idx = m[0].trainIdx;
             if (idx >= (int)vo.prev_kp.size()) continue;
@@ -43,9 +43,9 @@ bool track(VOSystem& vo, const cv::Mat& img,
     // --- 3. recover relative pose ---
     cv::Mat R_rel, t_rel, mask_pose;
     cv::recoverPose(E, pts_cur, pts_ref, vo.K, R_rel, t_rel, mask_pose);
-    int pose_inliers = cv::countNonZero(mask_pose);
-    std::cout << "  pose inliers: " << pose_inliers << std::endl;
-    if (pose_inliers < 20) return false;
+    int n_inliers = cv::countNonZero(mask_pose);
+    std::cout << "  pose inliers: " << n_inliers << std::endl;
+    if (n_inliers < 20) return false;
 
     // --- 4. compose with previous absolute pose ---
     R_out = R_rel * vo.R_prev;
@@ -60,20 +60,20 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
 {
     // --- 1. match keyframe → current ---
     cv::BFMatcher matcher(cv::NORM_HAMMING);
-    std::vector<std::vector<cv::DMatch>> knn;
-    matcher.knnMatch(vo.kf_desc, desc, knn, 2);
+    std::vector<std::vector<cv::DMatch>> knn_matches;
+    matcher.knnMatch(vo.kf_desc, desc, knn_matches, 2);
 
-    std::vector<cv::DMatch> good;
+    std::vector<cv::DMatch> good_matches;
     std::vector<cv::Point2f> pts_kf, pts_cur;
-    for (const auto& m : knn) {
+    for (const auto& m : knn_matches) {
         if (m[0].distance < 0.8f * m[1].distance) {
-            good.push_back(m[0]);
+            good_matches.push_back(m[0]);
             pts_kf.push_back(vo.kf_kp[m[0].queryIdx].pt);
             pts_cur.push_back(kp[m[0].trainIdx].pt);
         }
     }
-    std::cout << "[tri] matches: " << good.size() << std::endl;
-    if (good.size() < 30) return;
+    std::cout << "[tri] matches: " << good_matches.size() << std::endl;
+    if (good_matches.size() < 30) return;
 
     // --- 2. projection matrices ---
     cv::Mat Rt1, Rt2;
@@ -85,15 +85,15 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
     cv::triangulatePoints(P1, P2, pts_kf, pts_cur, pts4D);
 
     // --- 3. adaptive distance threshold from existing map ---
-    std::vector<double> zs;
+    std::vector<double> valid_dists;
     for (const auto& p : vo.map_points) {
         double d = std::sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
-        if (d > 0) zs.push_back(d);
+        if (d > 0) valid_dists.push_back(d);
     }
-    double maxD = 100.0;
-    if (!zs.empty()) {
-        std::sort(zs.begin(), zs.end());
-        maxD = zs[zs.size()/2] * 20.0;
+    double max_dist = 100.0;
+    if (!valid_dists.empty()) {
+        std::sort(valid_dists.begin(), valid_dists.end());
+        max_dist = valid_dists[valid_dists.size()/2] * 20.0;
     }
 
     // --- 4. quality filter ---
@@ -111,7 +111,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
         }
 
         double dist = std::sqrt(X*X+Y*Y+Z*Z);
-        if (dist > maxD) { rej_dist++; continue; }
+        if (dist > max_dist) { rej_dist++; continue; }
 
         cv::Mat pr1 = P1 * Xw, pr2 = P2 * Xw;
         double u1 = pr1.at<double>(0)/pr1.at<double>(2);
@@ -123,7 +123,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
         if (std::max(e1,e2) > 3.0) { rej_reproj++; continue; }
 
         vo.map_points.push_back(cv::Point3f(X,Y,Z));
-        vo.map_descs.push_back(desc.row(good[i].trainIdx));
+        vo.map_descriptors.push_back(desc.row(good_matches[i].trainIdx));
         added++;
     }
     std::cout << "[tri] added:" << added << " rej(depth:" << rej_depth

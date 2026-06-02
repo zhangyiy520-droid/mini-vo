@@ -5,18 +5,19 @@
 namespace mini_vo {
 
 /**
- * Initialize the VO system from two frames.
+ * 从两帧初始化 VO 系统。
  *
- * Pipeline:
- *   1. ORB extract + BF match + ratio test
- *   2. Essential matrix (RANSAC) + SVD correction
+ * 流程：
+ *   1. ORB 提取 + BF 匹配 + ratio test
+ *   2. 本质矩阵（RANSAC）+ SVD 校正（强制 σ₁=σ₂, σ₃=0）
  *   3. recoverPose → R, t
- *   4. Triangulate map points
- *   5. Median-depth-based outlier filtering
- *   6. Reprojection error check
+ *   4. DLT 三角化地图点
+ *   5. 中值深度离群过滤 + 重投影误差检查
  *
- * On success: populates vo.R_cw / vo.t_cw / vo.map_points / vo.map_descriptors
- *             and sets prev_* / kf_* state for the next tracking frame.
+ * 成功时：填充 vo.R_cw / vo.t_cw / vo.map_points / vo.map_descs，
+ *         并设置 prev_* / kf_* 状态供后续跟踪。
+ *
+ * kf_* 固定为第一帧（世界原点），后续三角化均以此为参考做大基线三角化。
  */
 bool initialize(VOSystem& vo,
                 const cv::Mat& img1,

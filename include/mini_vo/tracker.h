@@ -5,21 +5,21 @@
 namespace mini_vo {
 
 /**
- * Track current frame against existing map points (3D-2D PnP).
+ * 用地图点追踪当前帧（3D-2D PnP）。
  *
- * Pipeline:
- *   1. ORB extract on current frame (2000 features)
- *   2. BF match desc → state.map_descs (ratio test 0.8)
- *   3. Collect 2D-3D correspondences
+ * 流程：
+ *   1. 当前帧 ORB 提取（2000 特征点）
+ *   2. BF 匹配当前帧描述子 → state.map_descs（ratio test 0.8）
+ *   3. 收集 2D-3D 对应点
  *   4. solvePnPRansac → R, t
  *
- * Returns false if fewer than 10 matches or <10 PnP inliers.
+ * 匹配数 < 10 或 PnP 内点 < 10 时返回 false。
  *
- * Optional outputs (pass non-null pointers for debug visualization):
- *   out_kp      → ORB keypoints extracted from img
- *   out_pts2D   → 2D points used in PnP
- *   out_pts3D   → 3D map points used in PnP
- *   out_inliers → PnP inlier indices
+ * 可选调试输出（传非空指针获取可视化数据）：
+ *   out_kp      → 当前帧 ORB 特征点
+ *   out_pts2D   → PnP 使用的 2D 观测点
+ *   out_pts3D   → PnP 使用的 3D 地图点
+ *   out_inliers → PnP RANSAC 内点索引
  */
 bool track(const cv::Mat& img,
            const cv::Mat& K,
@@ -32,8 +32,7 @@ bool track(const cv::Mat& img,
            cv::Mat* out_inliers = nullptr);
 
 /**
- * Triangulate new map points between keyframe and current frame.
- * Called every N frames (keyframe interval).
+ * 在关键帧和当前帧之间三角化新地图点。
  */
 void triangulateNewPoints(VOSystem& vo,
                           const cv::Mat& img,

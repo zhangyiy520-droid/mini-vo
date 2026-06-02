@@ -13,15 +13,16 @@
 namespace fs = std::filesystem;
 
 // ============================================================
-// Dataset loaders
+// 数据集加载器
 // ============================================================
 
+/** 从目录加载图像（EuRoC 模式） */
 std::vector<std::string> loadDirectory(const std::string& dir,
                                         int max_frames = 200)
 {
     std::vector<std::string> files;
     if (!fs::is_directory(dir)) {
-        std::cerr << "Not a directory: " << dir << std::endl;
+        std::cerr << "非目录: " << dir << std::endl;
         return files;
     }
     for (const auto& entry : fs::directory_iterator(dir)) {
@@ -32,10 +33,11 @@ std::vector<std::string> loadDirectory(const std::string& dir,
     std::sort(files.begin(), files.end());
     if (!files.empty() && (int)files.size() > max_frames)
         files.resize(max_frames);
-    std::cout << "Loaded " << files.size() << " images from " << dir << std::endl;
+    std::cout << "加载 " << files.size() << " 张图像 (" << dir << ")" << std::endl;
     return files;
 }
 
+/** 从 rgb.txt 加载图像（TUM 模式），同步提取时间戳 */
 std::vector<std::string> loadTUM(const std::string& rgb_file,
                                   const std::string& data_dir,
                                   int max_frames,
@@ -44,7 +46,7 @@ std::vector<std::string> loadTUM(const std::string& rgb_file,
     std::vector<std::string> files;
     std::ifstream f(rgb_file);
     if (!f.is_open()) {
-        std::cerr << "Cannot open " << rgb_file << std::endl;
+        std::cerr << "无法打开 " << rgb_file << std::endl;
         return files;
     }
     std::string line;
@@ -60,21 +62,21 @@ std::vector<std::string> loadTUM(const std::string& rgb_file,
             count++;
         }
     }
-    std::cout << "Loaded " << files.size() << " images from " << rgb_file << std::endl;
+    std::cout << "加载 " << files.size() << " 张图像 (" << rgb_file << ")" << std::endl;
     return files;
 }
 
 // ============================================================
 void printUsage(const char* prog)
 {
-    std::cout << "Usage:\n"
-              << "  " << prog << " euroc <image_dir> [max_frames] [--viz]\n"
-              << "  " << prog << " tum  <data_dir>  [max_frames] [--viz]\n"
+    std::cout << "用法:\n"
+              << "  " << prog << " euroc <图像目录> [帧数] [--viz]\n"
+              << "  " << prog << " tum  <数据集目录> [帧数] [--viz]\n"
               << "\n"
-              << "  euroc: load *.png/*.jpg from a directory\n"
-              << "  tum:   load from rgb.txt inside data_dir\n"
-              << "  --viz: save debug images to debug/ directory\n"
-              << "  default max_frames = 200\n";
+              << "  euroc: 从目录加载 *.png/*.jpg\n"
+              << "  tum:   从数据集目录下的 rgb.txt 加载\n"
+              << "  --viz: 保存调试图片到 debug/ 目录\n"
+              << "  默认帧数 = 200\n";
 }
 
 // ============================================================
@@ -107,24 +109,26 @@ int main(int argc, char** argv)
     } else if (mode == "tum") {
         files = loadTUM(path + "/rgb.txt", path, max_frames, timestamps);
     } else {
-        std::cerr << "Unknown mode: " << mode << std::endl;
+        std::cerr << "未知模式: " << mode << std::endl;
         printUsage(argv[0]);
         return 1;
     }
 
     if (files.empty()) {
-        std::cerr << "No images found!" << std::endl;
+        std::cerr << "未找到图像!" << std::endl;
         return 1;
     }
 
-    // --- camera intrinsics ---
+    // --- 相机内参 ---
     cv::Mat K;
     if (mode == "tum") {
+        // TUM RGB-D fr1 (Kinect)
         K = (cv::Mat_<double>(3,3) <<
             517.3, 0, 318.6,
             0, 516.5, 255.3,
             0, 0, 1);
     } else {
+        // EuRoC MH_01 cam0
         K = (cv::Mat_<double>(3,3) <<
             458.654, 0, 367.215,
             0, 457.296, 248.375,
@@ -132,31 +136,31 @@ int main(int argc, char** argv)
     }
     std::cout << "K:\n" << K << std::endl;
 
-    if (visualize) std::cout << "Visualization: ON → debug/\n";
+    if (visualize) std::cout << "可视化: 开启 → debug/\n";
 
-    // --- run VO ---
+    // --- 运行 VO ---
     mini_vo::VOSystem vo;
     vo.K = K.clone();
 
     for (size_t i = 0; i < files.size(); i++) {
         cv::Mat img = cv::imread(files[i], cv::IMREAD_GRAYSCALE);
         if (img.empty()) {
-            std::cerr << "fail: " << files[i] << std::endl;
+            std::cerr << "失败: " << files[i] << std::endl;
             continue;
         }
         if (i % 50 == 0 || i == files.size() - 1) {
-            std::cout << "\n==== frame " << (i+1) << "/" << files.size()
+            std::cout << "\n==== 帧 " << (i+1) << "/" << files.size()
                       << " ====" << std::endl;
         }
         double ts = timestamps.empty() ? (double)i : timestamps[i];
         mini_vo::processFrame(vo, img, visualize, ts);
     }
 
-    // --- summary ---
-    std::cout << "\n========== Done ==========" << std::endl;
-    std::cout << "Map: " << vo.map_points.size() << " points" << std::endl;
-    std::cout << "Trajectory: " << vo.trajectory_R.size() << "/" << files.size()
-              << " frames (" << (100.0 * vo.trajectory_R.size() / files.size())
+    // --- 汇总 ---
+    std::cout << "\n========== 完成 ==========" << std::endl;
+    std::cout << "地图点: " << vo.map_points.size() << std::endl;
+    std::cout << "轨迹: " << vo.trajectory_R.size() << "/" << files.size()
+              << " 帧 (" << (100.0 * vo.trajectory_R.size() / files.size())
               << "%)" << std::endl;
 
     if (!timestamps.empty() && !vo.trajectory_ts.empty()) {
@@ -167,7 +171,7 @@ int main(int argc, char** argv)
     }
     mini_vo::saveMapPLY("map.ply", vo.map_points);
 
-    if (visualize) std::cout << "Debug images saved to debug/" << std::endl;
+    if (visualize) std::cout << "调试图片已保存到 debug/" << std::endl;
 
     return 0;
 }

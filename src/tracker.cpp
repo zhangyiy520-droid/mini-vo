@@ -17,18 +17,18 @@ bool track(const cv::Mat& img,
            std::vector<cv::Point3f>* out_pts3D,
            cv::Mat* out_inliers)
 {
-    // --- 1. ORB ---
+    // --- 1. ORB 特征提取（2000 点） ---
     auto orb = cv::ORB::create(2000);
     std::vector<cv::KeyPoint> kp;
     cv::Mat desc;
     orb->detectAndCompute(img, cv::Mat(), kp, desc);
 
-    // --- 2. match current descriptors → map descriptors ---
+    // --- 2. 当前帧描述子 → 地图描述子匹配 ---
     cv::BFMatcher matcher(cv::NORM_HAMMING);
     std::vector<std::vector<cv::DMatch>> knn;
     matcher.knnMatch(desc, state.map_descs, knn, 2);
 
-    // --- 3. ratio test + collect 2D-3D correspondences ---
+    // --- 3. ratio test + 收集 2D-3D 对应点 ---
     std::vector<cv::Point2f> pts2D;
     std::vector<cv::Point3f> pts3D;
     for (const auto& m : knn) {
@@ -42,23 +42,23 @@ bool track(const cv::Mat& img,
 
     std::cout << "[track] 2D-3D: " << pts2D.size();
     if (pts2D.size() < 10) {
-        std::cout << " (too few)" << std::endl;
+        std::cout << " (匹配不足)" << std::endl;
         return false;
     }
 
-    // --- 4. PnP ---
+    // --- 4. PnP 位姿解算（solvePnPRansac + 返回值检查） ---
     cv::Mat rvec, tvec, inliers;
     bool ok = cv::solvePnPRansac(pts3D, pts2D, K, cv::Mat(),
                                   rvec, tvec, false, 100, 6.0, 0.99, inliers);
 
     int n_inliers = ok && !inliers.empty() ? inliers.rows : 0;
-    std::cout << "  inliers: " << n_inliers << std::endl;
+    std::cout << "  内点: " << n_inliers << std::endl;
     if (!ok || inliers.empty() || n_inliers < 10) return false;
 
     cv::Rodrigues(rvec, R_out);
     t_out = tvec;
 
-    // --- 5. optional debug outputs ---
+    // --- 5. 可选调试输出 ---
     if (out_kp)    *out_kp = std::move(kp);
     if (out_pts2D) *out_pts2D = pts2D;
     if (out_pts3D) *out_pts3D = pts3D;
@@ -72,7 +72,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
                           const cv::Mat& desc,
                           const cv::Mat& R_cur, const cv::Mat& t_cur)
 {
-    // --- 1. match keyframe → current ---
+    // --- 1. 关键帧 → 当前帧匹配 ---
     cv::BFMatcher matcher(cv::NORM_HAMMING);
     std::vector<std::vector<cv::DMatch>> knn;
     matcher.knnMatch(vo.kf_desc, desc, knn, 2);
@@ -86,10 +86,10 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
             pts_cur.push_back(kp[m[0].trainIdx].pt);
         }
     }
-    std::cout << "[tri] matches: " << good.size() << std::endl;
+    std::cout << "[tri] 匹配: " << good.size() << std::endl;
     if (good.size() < 30) return;
 
-    // --- 2. projection matrices ---
+    // --- 2. 投影矩阵 ---
     cv::Mat Rt1, Rt2;
     cv::hconcat(vo.R_kf, vo.t_kf, Rt1);
     cv::hconcat(R_cur, t_cur, Rt2);
@@ -98,7 +98,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
     cv::Mat pts4D;
     cv::triangulatePoints(P1, P2, pts_kf, pts_cur, pts4D);
 
-    // --- 3. camera centers for parallax check ---
+    // --- 3. 光心坐标（视差角检查用） ---
     cv::Mat O1, O2;
     {
         cv::Mat Rkf_t;
@@ -109,7 +109,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
         O2 = -Rc_t * t_cur;
     }
 
-    // --- 4. adaptive distance threshold (×5 not ×20) ---
+    // --- 4. 自适应距离阈值（中值 ×5，下界 ×0.1） ---
     std::vector<double> zs;
     for (const auto& p : vo.map_points) {
         double d = std::sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
@@ -123,7 +123,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
         minD = med * 0.1;
     }
 
-    // --- 5. quality filter ---
+    // --- 5. 质量过滤 ---
     int added = 0, rej_depth = 0, rej_parallax = 0, rej_dist = 0, rej_reproj = 0;
     for (int i = 0; i < pts4D.cols; i++) {
         cv::Mat c = pts4D.col(i);
@@ -137,7 +137,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
             rej_depth++; continue;
         }
 
-        // parallax angle check
+        // 视差角检查（cos > 0.999 ≈ 视差角 < 2.5°，三角化极不稳定，剔除）
         cv::Mat Xw3 = (cv::Mat_<double>(3,1) << X, Y, Z);
         cv::Mat ray1 = Xw3 - O1;
         cv::Mat ray2 = Xw3 - O2;
@@ -150,6 +150,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
         double dist = std::sqrt(X*X+Y*Y+Z*Z);
         if (dist < minD || dist > maxD) { rej_dist++; continue; }
 
+        // 重投影误差检查
         cv::Mat pr1 = P1 * Xw, pr2 = P2 * Xw;
         double u1 = pr1.at<double>(0)/pr1.at<double>(2);
         double v1 = pr1.at<double>(1)/pr1.at<double>(2);
@@ -163,12 +164,12 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
         vo.map_descs.push_back(desc.row(good[i].trainIdx));
         added++;
     }
-    std::cout << "[tri] added:" << added
-              << " rej(depth:" << rej_depth
-              << " parallax:" << rej_parallax
-              << " dist:" << rej_dist
-              << " reproj:" << rej_reproj
-              << ") total:" << vo.map_points.size() << std::endl;
+    std::cout << "[tri] 新增:" << added
+              << " 拒绝(深度:" << rej_depth
+              << " 视差:" << rej_parallax
+              << " 距离:" << rej_dist
+              << " 重投影:" << rej_reproj
+              << ") 总计:" << vo.map_points.size() << std::endl;
 }
 
 } // namespace mini_vo

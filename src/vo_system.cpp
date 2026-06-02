@@ -15,7 +15,7 @@ namespace mini_vo {
 namespace fs = std::filesystem;
 
 // ============================================================
-// Debug visualization helpers
+// 调试可视化辅助函数
 // ============================================================
 
 static void saveDebugImage(const cv::Mat& img, int frame_id,
@@ -38,7 +38,7 @@ void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize, double times
     vo.frame_count++;
 
     // ========================================================
-    // UNINITIALIZED
+    // 未初始化 — 等待第二帧执行 initialize()
     // ========================================================
     if (vo.status == VOStatus::UNINITIALIZED) {
         auto orb = cv::ORB::create(2000);
@@ -60,42 +60,43 @@ void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize, double times
             vo.trajectory_R.push_back(cv::Mat::eye(3,3,CV_64F));
             vo.trajectory_t.push_back(cv::Mat::zeros(3,1,CV_64F));
             vo.trajectory_ts.push_back(timestamp);
-            std::cout << "[frame " << vo.frame_count << "] waiting "
+            std::cout << "[frame " << vo.frame_count << "] 等待 "
                       << "orb:" << kp.size() << std::endl;
             return;
         }
 
-        std::cout << "[frame " << vo.frame_count << "] init... ";
+        std::cout << "[frame " << vo.frame_count << "] 初始化... ";
         if (initialize(vo, vo.prev_img, img, vo.prev_kp, vo.prev_desc, kp, desc)) {
             vo.status = VOStatus::TRACKING;
             vo.last_keyframe = vo.frame_count;
             vo.trajectory_R.push_back(vo.R_cw.clone());
             vo.trajectory_t.push_back(vo.t_cw.clone());
             vo.trajectory_ts.push_back(timestamp);
-            std::cout << "[frame " << vo.frame_count << "] INIT OK "
-                      << "map:" << vo.map_points.size() << std::endl;
+            std::cout << "[frame " << vo.frame_count << "] 初始化成功 "
+                      << "地图点:" << vo.map_points.size() << std::endl;
 
             if (visualize) {
                 cv::Mat init_vis;
                 cv::cvtColor(img, init_vis, cv::COLOR_GRAY2BGR);
                 cv::drawKeypoints(init_vis, kp, init_vis, cv::Scalar(0, 255, 0),
                                   cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-                std::string label = "INIT OK  map:" + std::to_string(vo.map_points.size());
+                std::string label = "初始化成功  地图点:" + std::to_string(vo.map_points.size());
                 cv::putText(init_vis, label, cv::Point(10, 25),
                             cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
                 saveDebugImage(init_vis, vo.frame_count, "init_ok");
             }
             return;
         }
+        // 初始化失败：滑动第一帧到当前帧
         vo.prev_img = img.clone();
         vo.prev_kp = kp;
         vo.prev_desc = desc.clone();
-        std::cout << "FAILED" << std::endl;
+        std::cout << "失败" << std::endl;
         return;
     }
 
     // ========================================================
-    // TRACKING — 3D-2D PnP with debug viz
+    // 跟踪 — 纯 3D-2D PnP
     // ========================================================
     if (vo.status == VOStatus::TRACKING) {
         cv::Mat R, t;
@@ -118,6 +119,7 @@ void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize, double times
             vo.trajectory_t.push_back(t.clone());
             vo.trajectory_ts.push_back(timestamp);
 
+            // 可视化：蓝点=ORB，黄圈=3D-2D 匹配，绿圈=PnP 内点
             if (visualize && !dbg_kp.empty()) {
                 cv::Mat vis;
                 cv::cvtColor(img, vis, cv::COLOR_GRAY2BGR);
@@ -133,15 +135,16 @@ void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize, double times
                     }
                 }
                 int n_inl = dbg_inliers.empty() ? 0 : dbg_inliers.rows;
-                std::string label = "track " + std::to_string(vo.frame_count) +
+                std::string label = "跟踪 " + std::to_string(vo.frame_count) +
                                     "  ORB:" + std::to_string(dbg_kp.size()) +
-                                    "  match:" + std::to_string(dbg_pts2D.size()) +
-                                    "  inlier:" + std::to_string(n_inl);
+                                    "  匹配:" + std::to_string(dbg_pts2D.size()) +
+                                    "  内点:" + std::to_string(n_inl);
                 cv::putText(vis, label, cv::Point(10, 25),
                             cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
                 saveDebugImage(vis, vo.frame_count, "track");
             }
 
+            // 每帧三角化新点（与 init 第一帧做大基线三角化）
             if (vo.frame_count - vo.last_keyframe >= 1) {
                 auto orb = cv::ORB::create(2000);
                 std::vector<cv::KeyPoint> kp_tri;
@@ -158,15 +161,16 @@ void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize, double times
         if (visualize) {
             cv::Mat lost_vis;
             cv::cvtColor(img, lost_vis, cv::COLOR_GRAY2BGR);
-            cv::putText(lost_vis, "LOST", cv::Point(10, 25),
+            cv::putText(lost_vis, "跟踪丢失", cv::Point(10, 25),
                         cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 0, 255), 2);
             saveDebugImage(lost_vis, vo.frame_count, "lost");
         }
+        std::cout << "[frame " << vo.frame_count << "] 跟踪丢失" << std::endl;
         return;
     }
 
     // ========================================================
-    // LOST — retry init with growing parallax
+    // 丢失 — 用关键帧固定锚点 + 累积视差重初始化
     // ========================================================
     if (vo.status == VOStatus::LOST) {
         auto orb = cv::ORB::create(2000);
@@ -174,19 +178,21 @@ void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize, double times
         cv::Mat desc;
         orb->detectAndCompute(img, cv::Mat(), kp, desc);
 
+        // 关键帧冻结——不随 LOST 帧滑动，等待运动积累到足够基线
         if (initialize(vo, vo.kf_img, img, vo.kf_kp, vo.kf_desc, kp, desc)) {
             vo.status = VOStatus::TRACKING;
             vo.last_keyframe = vo.frame_count;
             vo.trajectory_R.push_back(vo.R_cw.clone());
             vo.trajectory_t.push_back(vo.t_cw.clone());
             vo.trajectory_ts.push_back(timestamp);
+            std::cout << "[frame " << vo.frame_count << "] 重初始化成功" << std::endl;
 
             if (visualize) {
                 cv::Mat reinit_vis;
                 cv::cvtColor(img, reinit_vis, cv::COLOR_GRAY2BGR);
                 cv::drawKeypoints(reinit_vis, kp, reinit_vis, cv::Scalar(0, 255, 0),
                                   cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-                cv::putText(reinit_vis, "RE-INIT OK", cv::Point(10, 25),
+                cv::putText(reinit_vis, "重初始化成功", cv::Point(10, 25),
                             cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
                 saveDebugImage(reinit_vis, vo.frame_count, "reinit_ok");
             }
@@ -196,13 +202,16 @@ void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize, double times
         if (visualize) {
             cv::Mat fail_vis;
             cv::cvtColor(img, fail_vis, cv::COLOR_GRAY2BGR);
-            cv::putText(fail_vis, "re-init FAIL", cv::Point(10, 25),
+            cv::putText(fail_vis, "重初始化失败", cv::Point(10, 25),
                         cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 255), 2);
             saveDebugImage(fail_vis, vo.frame_count, "reinit_fail");
         }
+        std::cout << "[frame " << vo.frame_count << "] 重初始化失败" << std::endl;
     }
 }
 
+// ============================================================
+// 轨迹保存（帧序号时间戳）
 // ============================================================
 void saveTrajectory(const std::string& path,
                     const std::vector<cv::Mat>& Rs,
@@ -225,7 +234,7 @@ void saveTrajectory(const std::string& path,
           << qx << " " << qy << " " << qz << " " << qw << "\n";
     }
     f.close();
-    std::cout << "Saved " << path << " (" << Rs.size() << " poses)" << std::endl;
+    std::cout << "保存 " << path << " (" << Rs.size() << " 帧)" << std::endl;
 }
 
 void saveTrajectoryTUM(const std::string& path,
@@ -250,7 +259,7 @@ void saveTrajectoryTUM(const std::string& path,
           << qx << " " << qy << " " << qz << " " << qw << "\n";
     }
     f.close();
-    std::cout << "Saved " << path << " (" << Rs.size() << " poses, TUM timestamps)" << std::endl;
+    std::cout << "保存 " << path << " (" << Rs.size() << " 帧, TUM 时间戳)" << std::endl;
 }
 
 void saveMapPLY(const std::string& path, const std::vector<cv::Point3f>& pts)
@@ -268,7 +277,7 @@ void saveMapPLY(const std::string& path, const std::vector<cv::Point3f>& pts)
           << r << " " << (255 - r) << " 0\n";
     }
     f.close();
-    std::cout << "Saved " << path << " (" << pts.size() << " points)" << std::endl;
+    std::cout << "保存 " << path << " (" << pts.size() << " 点)" << std::endl;
 }
 
 } // namespace mini_vo

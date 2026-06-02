@@ -15,7 +15,7 @@ struct VOSystem {
     cv::Mat t_cw;                            // current translation
 
     std::vector<cv::Point3f> map_points;      // 3D map (world frame)
-    cv::Mat map_descriptors;                  // descriptors for map points
+    cv::Mat map_descs;                        // descriptors for map points
 
     cv::Mat prev_img;
     std::vector<cv::KeyPoint> prev_kp;
@@ -33,6 +33,7 @@ struct VOSystem {
 
     std::vector<cv::Mat> trajectory_R;        // all frame rotations
     std::vector<cv::Mat> trajectory_t;        // all frame translations
+    std::vector<double> trajectory_ts;         // timestamps for each pose
 };
 
 } // namespace mini_vo

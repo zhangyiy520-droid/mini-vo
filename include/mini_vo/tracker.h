@@ -5,26 +5,34 @@
 namespace mini_vo {
 
 /**
- * Track current frame against the previous frame (2D-2D).
+ * Track current frame against existing map points (3D-2D PnP).
  *
  * Pipeline:
- *   1. ORB extract on new frame
- *   2. BF match current → previous descriptors (ratio test)
- *   3. Essential matrix (RANSAC) → E
- *   4. recoverPose → R_rel, t_rel
- *   5. Compose: R_cur = R_rel * R_prev, t_cur = R_rel * t_prev + t_rel
+ *   1. ORB extract on current frame (2000 features)
+ *   2. BF match desc → state.map_descs (ratio test 0.8)
+ *   3. Collect 2D-3D correspondences
+ *   4. solvePnPRansac → R, t
  *
- * Returns false if matching fails (<30 matches or <20 inliers).
+ * Returns false if fewer than 10 matches or <10 PnP inliers.
+ *
+ * Optional outputs (pass non-null pointers for debug visualization):
+ *   out_kp      → ORB keypoints extracted from img
+ *   out_pts2D   → 2D points used in PnP
+ *   out_pts3D   → 3D map points used in PnP
+ *   out_inliers → PnP inlier indices
  */
-bool track(VOSystem& vo,
-           const cv::Mat& img,
-           const std::vector<cv::KeyPoint>& kp,
-           const cv::Mat& desc,
+bool track(const cv::Mat& img,
+           const cv::Mat& K,
+           VOSystem& state,
            cv::Mat& R_out,
-           cv::Mat& t_out);
+           cv::Mat& t_out,
+           std::vector<cv::KeyPoint>* out_kp = nullptr,
+           std::vector<cv::Point2f>* out_pts2D = nullptr,
+           std::vector<cv::Point3f>* out_pts3D = nullptr,
+           cv::Mat* out_inliers = nullptr);
 
 /**
- * Triangulate new map points between last keyframe and current frame.
+ * Triangulate new map points between keyframe and current frame.
  * Called every N frames (keyframe interval).
  */
 void triangulateNewPoints(VOSystem& vo,

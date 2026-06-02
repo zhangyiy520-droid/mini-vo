@@ -15,20 +15,20 @@ bool initialize(VOSystem& vo, const cv::Mat& img1, const cv::Mat& img2,
 {
     // --- 1. ratio test ---
     cv::BFMatcher matcher(cv::NORM_HAMMING);
-    std::vector<std::vector<cv::DMatch>> knn_matches;
-    matcher.knnMatch(desc1, desc2, knn_matches, 2);
+    std::vector<std::vector<cv::DMatch>> knn;
+    matcher.knnMatch(desc1, desc2, knn, 2);
 
-    std::vector<cv::DMatch> good_matches;
+    std::vector<cv::DMatch> good;
     std::vector<cv::Point2f> pts1, pts2;
-    for (const auto& m : knn_matches) {
+    for (const auto& m : knn) {
         if (m[0].distance < 0.8f * m[1].distance) {
-            good_matches.push_back(m[0]);
+            good.push_back(m[0]);
             pts1.push_back(kp1[m[0].queryIdx].pt);
             pts2.push_back(kp2[m[0].trainIdx].pt);
         }
     }
-    std::cout << "[init] matches: " << good_matches.size() << std::endl;
-    if (good_matches.size() < 30) return false;
+    std::cout << "[init] matches: " << good.size() << std::endl;
+    if (good.size() < 30) return false;
 
     // --- 2. essential matrix (RANSAC inside) ---
     cv::Mat mask_E;
@@ -39,48 +39,51 @@ bool initialize(VOSystem& vo, const cv::Mat& img1, const cv::Mat& img2,
     // --- 3. SVD correction (enforce sigma1=sigma2, sigma3=0) ---
     cv::Mat w, u, vt;
     cv::SVD::compute(E, w, u, vt);
-    double singular_mean = (w.at<double>(0) + w.at<double>(1)) / 2.0;
-    cv::Mat w_correct = (cv::Mat_<double>(3,3) << singular_mean,0,0, 0,singular_mean,0, 0,0,0);
-    cv::Mat E_correct = u * w_correct * vt;
+    double sm = (w.at<double>(0) + w.at<double>(1)) / 2.0;
+    cv::Mat wc = (cv::Mat_<double>(3,3) << sm,0,0, 0,sm,0, 0,0,0);
+    cv::Mat Ec = u * wc * vt;
 
     // --- 4. recover pose ---
-    cv::Mat R_cv, t_cv, mask_pose;
-    cv::recoverPose(E_correct, pts1, pts2, vo.K, R_cv, t_cv, mask_pose);
+    cv::Mat R, t, mask_pose;
+    cv::recoverPose(Ec, pts1, pts2, vo.K, R, t, mask_pose);
 
-    std::vector<cv::Point2f> inlier_pts1, inlier_pts2;
+    // Collect pose inliers + save original good indices (fix Bug #3)
+    std::vector<cv::Point2f> ipts1, ipts2;
+    std::vector<int> iorig;   // original index in good[] for each inlier
     for (int i = 0; i < mask_pose.rows; i++) {
         if (mask_pose.at<uchar>(i)) {
-            inlier_pts1.push_back(pts1[i]);
-            inlier_pts2.push_back(pts2[i]);
+            ipts1.push_back(pts1[i]);
+            ipts2.push_back(pts2[i]);
+            iorig.push_back(i);
         }
     }
-    std::cout << "[init] pose inliers: " << inlier_pts1.size() << std::endl;
-    if (inlier_pts1.size() < 20) return false;
+    std::cout << "[init] pose inliers: " << ipts1.size() << std::endl;
+    if (ipts1.size() < 20) return false;
 
     // --- 5. triangulation ---
     cv::Mat P1 = vo.K * (cv::Mat_<double>(3,4) << 1,0,0,0, 0,1,0,0, 0,0,1,0);
-    cv::Mat Rt; cv::hconcat(R_cv, t_cv, Rt);
+    cv::Mat Rt; cv::hconcat(R, t, Rt);
     cv::Mat P2 = vo.K * Rt;
     cv::Mat pts4D;
-    cv::triangulatePoints(P1, P2, inlier_pts1, inlier_pts2, pts4D);
+    cv::triangulatePoints(P1, P2, ipts1, ipts2, pts4D);
 
     // --- 6. median depth for adaptive outlier threshold ---
-    std::vector<double> valid_Z;
+    std::vector<double> zs;
     for (int i = 0; i < pts4D.cols; i++) {
         cv::Mat c = pts4D.col(i);
         float W = c.at<float>(3);
         if (std::abs(W) < 1e-6f) continue;
         double Z = c.at<float>(2) / W;
-        if (Z > 0) valid_Z.push_back(Z);
+        if (Z > 0) zs.push_back(Z);
     }
-    if (valid_Z.size() < 10) return false;
-    std::sort(valid_Z.begin(), valid_Z.end());
-    double median_Z = valid_Z[valid_Z.size()/2];
-    double max_Z = median_Z * 10.0;
+    if (zs.size() < 10) return false;
+    std::sort(zs.begin(), zs.end());
+    double medZ = zs[zs.size()/2];
+    double maxZ = medZ * 10.0;
 
-    // --- 7. quality filtering ---
-    std::vector<cv::Point3f> points3D;
-    cv::Mat desc_inliers;
+    // --- 7. quality filtering (use iorig[i] for correct descriptor index) ---
+    std::vector<cv::Point3f> pts3D;
+    cv::Mat descs_out;
     for (int i = 0; i < pts4D.cols; i++) {
         cv::Mat c = pts4D.col(i);
         float W = c.at<float>(3);
@@ -88,7 +91,7 @@ bool initialize(VOSystem& vo, const cv::Mat& img1, const cv::Mat& img2,
         double X = c.at<float>(0)/W, Y = c.at<float>(1)/W, Z = c.at<float>(2)/W;
 
         cv::Mat Xc2 = Rt * (cv::Mat_<double>(4,1) << X,Y,Z,1.0);
-        if (Z <= 0 || Z > max_Z || Xc2.at<double>(2) <= 0) continue;
+        if (Z <= 0 || Z > maxZ || Xc2.at<double>(2) <= 0) continue;
 
         // reprojection error
         cv::Mat Xh = (cv::Mat_<double>(4,1) << X,Y,Z,1.0);
@@ -97,33 +100,35 @@ bool initialize(VOSystem& vo, const cv::Mat& img1, const cv::Mat& img2,
         double v1 = pr1.at<double>(1)/pr1.at<double>(2);
         double u2 = pr2.at<double>(0)/pr2.at<double>(2);
         double v2 = pr2.at<double>(1)/pr2.at<double>(2);
-        double e1 = std::sqrt(std::pow(u1-inlier_pts1[i].x,2)+std::pow(v1-inlier_pts1[i].y,2));
-        double e2 = std::sqrt(std::pow(u2-inlier_pts2[i].x,2)+std::pow(v2-inlier_pts2[i].y,2));
+        double e1 = std::sqrt(std::pow(u1-ipts1[i].x,2)+std::pow(v1-ipts1[i].y,2));
+        double e2 = std::sqrt(std::pow(u2-ipts2[i].x,2)+std::pow(v2-ipts2[i].y,2));
         if (std::max(e1,e2) > 3.0) continue;
 
-        points3D.push_back(cv::Point3f(X,Y,Z));
-        desc_inliers.push_back(desc2.row(good_matches[i].trainIdx));
+        pts3D.push_back(cv::Point3f(X,Y,Z));
+        // Bug #3 fix: use iorig[i] instead of i for correct good index
+        descs_out.push_back(desc2.row(good[iorig[i]].trainIdx));
     }
-    std::cout << "[init] map: " << points3D.size() << " points" << std::endl;
-    if (points3D.size() < 20) return false;
+    std::cout << "[init] map: " << pts3D.size() << " points" << std::endl;
+    if (pts3D.size() < 20) return false;
 
     // --- 8. write state ---
-    vo.R_cw = R_cv.clone();
-    vo.t_cw = t_cv.clone();
-    vo.map_points = points3D;
-    vo.map_descriptors = desc_inliers.clone();
+    vo.R_cw = R.clone();
+    vo.t_cw = t.clone();
+    vo.map_points = pts3D;
+    vo.map_descs = descs_out.clone();
 
     vo.prev_img = img2.clone();
     vo.prev_kp = kp2;
     vo.prev_desc = desc2.clone();
-    vo.R_prev = R_cv.clone();
-    vo.t_prev = t_cv.clone();
+    vo.R_prev = R.clone();
+    vo.t_prev = t.clone();
 
-    vo.kf_img = img2.clone();
-    vo.kf_kp = kp2;
-    vo.kf_desc = desc2.clone();
-    vo.R_kf = R_cv.clone();
-    vo.t_kf = t_cv.clone();
+    // kf_* = first frame of init pair (reference for triangulation with large baseline)
+    vo.kf_img = img1.clone();
+    vo.kf_kp = kp1;
+    vo.kf_desc = desc1.clone();
+    vo.R_kf = cv::Mat::eye(3,3,CV_64F);  // world origin
+    vo.t_kf = cv::Mat::zeros(3,1,CV_64F);
 
     return true;
 }

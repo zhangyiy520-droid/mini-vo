@@ -4,27 +4,17 @@
 
 namespace mini_vo {
 
-/**
- * Main VO entry point — processes one frame through the state machine.
- *
- * States:
- *   UNINITIALIZED → wait for 2nd frame, run initialize()
- *   TRACKING      → track against prev frame, optional keyframe
- *   LOST          → attempt re-initialization from prev frame
- */
-void processFrame(VOSystem& vo, const cv::Mat& img);
+void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize = false, double timestamp = -1.0);
 
-/**
- * Save trajectory in TUM format:
- *   frame_id tx ty tz qx qy qz qw
- */
 void saveTrajectory(const std::string& path,
                     const std::vector<cv::Mat>& Rs,
                     const std::vector<cv::Mat>& ts);
 
-/**
- * Save map points as ASCII PLY (colored by depth).
- */
+void saveTrajectoryTUM(const std::string& path,
+                        const std::vector<double>& timeStamps,
+                        const std::vector<cv::Mat>& Rs,
+                        const std::vector<cv::Mat>& ts);
+
 void saveMapPLY(const std::string& path,
                 const std::vector<cv::Point3f>& pts);
 

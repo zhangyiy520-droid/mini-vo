@@ -4,8 +4,6 @@ build/
 *.obj
 
 # VO outputs
-trajectory.txt
-map.ply
 
 # IDE
 .vscode/
@@ -21,3 +19,5 @@ Thumbs.db
 # Python
 __pycache__/
 *.pyc
+
+# results dir is tracked (not build outputs)

@@ -40,9 +40,15 @@ bool track(const cv::Mat& img,
         }
     }
 
-    std::cout << "[track] 2D-3D: " << pts2D.size();
     if (pts2D.size() < 10) {
-        std::cout << " (匹配不足)" << std::endl;
+        std::cout << "[track]"
+		  << "frame: " << state.frame_count
+		  << "matches: " << pts2D.size()
+		  << "inliner = 0"
+		  << "result=NOT_ENOUGH_MATCHES"
+		  << "map_points= " << state.map_points.size()
+		  << std::endl;
+
         return false;
     }
 
@@ -52,7 +58,14 @@ bool track(const cv::Mat& img,
                                   rvec, tvec, false, 100, 6.0, 0.99, inliers);
 
     int n_inliers = ok && !inliers.empty() ? inliers.rows : 0;
-    std::cout << "  内点: " << n_inliers << std::endl;
+    std::cout << "[TRACK]"
+          << " frame=" << state.frame_count
+          << " matches=" << pts2D.size()
+          << " inliers=" << n_inliers
+          << " map_points=" << state.map_points.size()
+          << " result="
+          << ((!ok || n_inliers < 10) ? "PNP_FAILED" : "OK")
+          << std::endl;
     if (!ok || inliers.empty() || n_inliers < 10) return false;
 
     cv::Rodrigues(rvec, R_out);

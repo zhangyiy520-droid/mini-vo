@@ -12,6 +12,8 @@ add_library(mini_vo STATIC
     src/initializer.cpp
     src/tracker.cpp
     src/vo_system.cpp
+    src/pose_utils.cpp
+    src/core/observation.cpp
 )
 target_include_directories(mini_vo PUBLIC include)
 target_link_libraries(mini_vo PUBLIC ${OpenCV_LIBS})
@@ -31,4 +33,8 @@ if(BUILD_TESTS)
     add_executable(test_tracker test/test_tracker.cpp)
     target_link_libraries(test_tracker mini_vo)
     add_test(NAME test_tracker COMMAND test_tracker)
+
+    add_executable(test_observation test/test_observation.cpp)
+    target_link_libraries(test_observation PRIVATE mini_vo)
+    add_test(NAME test_observation COMMAND test_observation)
 endif()

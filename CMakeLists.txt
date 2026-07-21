@@ -14,6 +14,7 @@ add_library(mini_vo STATIC
     src/vo_system.cpp
     src/pose_utils.cpp
     src/core/observation.cpp
+    src/core/map.cpp
 )
 target_include_directories(mini_vo PUBLIC include)
 target_link_libraries(mini_vo PUBLIC ${OpenCV_LIBS})
@@ -26,15 +27,20 @@ target_link_libraries(vo_bin mini_vo)
 option(BUILD_TESTS "Build unit tests" OFF)
 if(BUILD_TESTS)
     enable_testing()
+
     add_executable(test_initializer test/test_initializer.cpp)
-    target_link_libraries(test_initializer mini_vo)
+    target_link_libraries(test_initializer PRIVATE mini_vo)
     add_test(NAME test_initializer COMMAND test_initializer)
 
     add_executable(test_tracker test/test_tracker.cpp)
-    target_link_libraries(test_tracker mini_vo)
+    target_link_libraries(test_tracker PRIVATE mini_vo)
     add_test(NAME test_tracker COMMAND test_tracker)
 
     add_executable(test_observation test/test_observation.cpp)
     target_link_libraries(test_observation PRIVATE mini_vo)
     add_test(NAME test_observation COMMAND test_observation)
-endif()
+
+    add_executable(test_map test/test_map.cpp)
+    target_link_libraries(test_map PRIVATE mini_vo)
+    add_test(NAME test_map COMMAND test_map)
+endif()n

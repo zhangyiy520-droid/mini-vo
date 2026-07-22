@@ -1,4 +1,4 @@
-﻿#include "mini_vo/core/map.h"
+#include "mini_vo/core/map.h"
 
 #include <cmath>
 #include <utility>

@@ -15,6 +15,7 @@ add_library(mini_vo STATIC
     src/pose_utils.cpp
     src/core/observation.cpp
     src/core/map.cpp
+    src/camera/pinhole_camera.cpp
 )
 target_include_directories(mini_vo PUBLIC include)
 target_link_libraries(mini_vo PUBLIC ${OpenCV_LIBS})
@@ -43,4 +44,8 @@ if(BUILD_TESTS)
     add_executable(test_map test/test_map.cpp)
     target_link_libraries(test_map PRIVATE mini_vo)
     add_test(NAME test_map COMMAND test_map)
-endif()n
+
+    add_executable(test_camera test/test_camera.cpp)
+    target_link_libraries(test_camera PRIVATE mini_vo)
+    add_test(NAME test_camera COMMAND test_camera)
+endif()

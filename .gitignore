@@ -4,6 +4,12 @@ build/
 *.obj
 
 # VO outputs
+runs/
+results/day*_baseline/
+*.ply
+*.tum
+*.kitti
+*.log
 
 # IDE
 .vscode/
@@ -20,4 +26,3 @@ Thumbs.db
 __pycache__/
 *.pyc
 
-# results dir is tracked (not build outputs)

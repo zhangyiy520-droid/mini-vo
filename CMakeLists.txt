@@ -16,6 +16,7 @@ add_library(mini_vo STATIC
     src/core/observation.cpp
     src/core/map.cpp
     src/camera/pinhole_camera.cpp
+    src/backend/reprojection_error.cpp
 )
 target_include_directories(mini_vo PUBLIC include)
 target_link_libraries(mini_vo PUBLIC ${OpenCV_LIBS})
@@ -48,4 +49,8 @@ if(BUILD_TESTS)
     add_executable(test_camera test/test_camera.cpp)
     target_link_libraries(test_camera PRIVATE mini_vo)
     add_test(NAME test_camera COMMAND test_camera)
+
+    add_executable(test_reprojection_error test/test_reprojection_error.cpp)
+    target_link_libraries(test_reprojection_error PRIVATE mini_vo)
+    add_test(NAME test_reprojection_error COMMAND test_reprojection_error)
 endif()

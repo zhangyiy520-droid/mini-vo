@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Dependencies ---
 find_package(OpenCV REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(Sophus CONFIG REQUIRED)
 
 # --- Library ---
 add_library(mini_vo STATIC
@@ -15,11 +17,16 @@ add_library(mini_vo STATIC
     src/pose_utils.cpp
     src/core/observation.cpp
     src/core/map.cpp
+    src/core/se3_utils.cpp
     src/camera/pinhole_camera.cpp
     src/backend/reprojection_error.cpp
 )
 target_include_directories(mini_vo PUBLIC include)
-target_link_libraries(mini_vo PUBLIC ${OpenCV_LIBS})
+target_link_libraries(mini_vo PUBLIC
+    ${OpenCV_LIBS}
+    Eigen3::Eigen
+    Sophus::Sophus
+)
 
 # --- Main executable ---
 add_executable(vo_bin src/main.cpp)
@@ -53,4 +60,8 @@ if(BUILD_TESTS)
     add_executable(test_reprojection_error test/test_reprojection_error.cpp)
     target_link_libraries(test_reprojection_error PRIVATE mini_vo)
     add_test(NAME test_reprojection_error COMMAND test_reprojection_error)
+
+    add_executable(test_se3_utils test/test_se3_utils.cpp)
+    target_link_libraries(test_se3_utils PRIVATE mini_vo)
+    add_test(NAME test_se3_utils COMMAND test_se3_utils)
 endif()

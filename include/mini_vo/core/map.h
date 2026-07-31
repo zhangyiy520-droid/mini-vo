@@ -41,6 +41,9 @@ public:
     const MapPoint* findMapPoint(MapPointId id) const;
 
     bool eraseMapPoint(MapPointId id);
+    bool setObservationOutlier(KeyFrameId keyframe_id,
+                               MapPointId map_point_id,
+                               bool outlier);
 
     const ObservationStore& observations() const;
     std::size_t keyFrameCount() const;

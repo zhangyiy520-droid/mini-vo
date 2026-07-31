@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Sophus CONFIG REQUIRED)
+find_package(g2o CONFIG REQUIRED)
 
 # --- Library ---
 add_library(mini_vo STATIC
@@ -18,6 +19,13 @@ add_library(mini_vo STATIC
     src/core/observation.cpp
     src/core/map.cpp
     src/core/se3_utils.cpp
+    src/backend/g2o_graph_builder.cpp
+    src/backend/pose_optimizer.cpp
+    src/backend/point_optimizer.cpp
+    src/backend/robust_policy.cpp
+    src/backend/bundle_adjuster.cpp
+    src/backend/local_window_selector.cpp
+    src/backend/local_bundle_adjuster.cpp
     src/camera/pinhole_camera.cpp
     src/backend/reprojection_error.cpp
 )
@@ -26,6 +34,9 @@ target_link_libraries(mini_vo PUBLIC
     ${OpenCV_LIBS}
     Eigen3::Eigen
     Sophus::Sophus
+    g2o::core
+    g2o::types_sba
+    g2o::solver_dense
 )
 
 # --- Main executable ---
@@ -64,4 +75,32 @@ if(BUILD_TESTS)
     add_executable(test_se3_utils test/test_se3_utils.cpp)
     target_link_libraries(test_se3_utils PRIVATE mini_vo)
     add_test(NAME test_se3_utils COMMAND test_se3_utils)
+
+    add_executable(test_g2o_graph_builder test/test_g2o_graph_builder.cpp)
+    target_link_libraries(test_g2o_graph_builder PRIVATE mini_vo)
+    add_test(NAME test_g2o_graph_builder COMMAND test_g2o_graph_builder)
+
+    add_executable(test_pose_optimizer test/test_pose_optimizer.cpp)
+    target_link_libraries(test_pose_optimizer PRIVATE mini_vo)
+    add_test(NAME test_pose_optimizer COMMAND test_pose_optimizer)
+
+    add_executable(test_point_optimizer test/test_point_optimizer.cpp)
+    target_link_libraries(test_point_optimizer PRIVATE mini_vo)
+    add_test(NAME test_point_optimizer COMMAND test_point_optimizer)
+
+    add_executable(test_robust_policy test/test_robust_policy.cpp)
+    target_link_libraries(test_robust_policy PRIVATE mini_vo)
+    add_test(NAME test_robust_policy COMMAND test_robust_policy)
+
+    add_executable(test_bundle_adjuster test/test_bundle_adjuster.cpp)
+    target_link_libraries(test_bundle_adjuster PRIVATE mini_vo)
+    add_test(NAME test_bundle_adjuster COMMAND test_bundle_adjuster)
+
+    add_executable(test_local_window_selector test/test_local_window_selector.cpp)
+    target_link_libraries(test_local_window_selector PRIVATE mini_vo)
+    add_test(NAME test_local_window_selector COMMAND test_local_window_selector)
+
+    add_executable(test_local_bundle_adjuster test/test_local_bundle_adjuster.cpp)
+    target_link_libraries(test_local_bundle_adjuster PRIVATE mini_vo)
+    add_test(NAME test_local_bundle_adjuster COMMAND test_local_bundle_adjuster)
 endif()

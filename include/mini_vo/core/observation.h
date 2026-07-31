@@ -24,6 +24,9 @@ class ObservationStore {
 public:
     bool add(const Observation& observation);
     bool erase(KeyFrameId keyframe_id, MapPointId map_point_id);
+    bool setOutlier(KeyFrameId keyframe_id,
+                    MapPointId map_point_id,
+                    bool outlier);
 
     std::vector<Observation> byKeyFrame(KeyFrameId keyframe_id) const;
     std::vector<Observation> byMapPoint(MapPointId map_point_id) const;
@@ -37,4 +40,3 @@ private:
 };
 
 }  // namespace mini_vo
-

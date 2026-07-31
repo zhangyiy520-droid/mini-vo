@@ -99,6 +99,12 @@ bool Map::eraseMapPoint(MapPointId id) {
     return true;
 }
 
+bool Map::setObservationOutlier(KeyFrameId keyframe_id,
+                                MapPointId map_point_id,
+                                bool outlier) {
+    return observations_.setOutlier(keyframe_id, map_point_id, outlier);
+}
+
 const ObservationStore& Map::observations() const {
     return observations_;
 }

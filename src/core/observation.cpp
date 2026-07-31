@@ -55,6 +55,18 @@ bool ObservationStore::erase(KeyFrameId keyframe_id,
     return observations_.size() != old_size;
 }
 
+bool ObservationStore::setOutlier(KeyFrameId keyframe_id,
+                                  MapPointId map_point_id,
+                                  bool outlier) {
+    for (Observation& observation : observations_) {
+        if (sameLink(observation, keyframe_id, map_point_id)) {
+            observation.outlier = outlier;
+            return true;
+        }
+    }
+    return false;
+}
+
 std::vector<Observation> ObservationStore::byKeyFrame(
     KeyFrameId keyframe_id) const {
     std::vector<Observation> result;
@@ -103,4 +115,3 @@ bool ObservationStore::validate() const {
 }
 
 }  // namespace mini_vo
-

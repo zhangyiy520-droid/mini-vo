@@ -43,6 +43,10 @@ target_link_libraries(mini_vo PUBLIC
 add_executable(vo_bin src/main.cpp)
 target_link_libraries(vo_bin mini_vo)
 
+# --- Learning executable: Day35 Gauss-Newton ---
+add_executable(day35_gauss_newton apps/day35_gauss_newton.cpp)
+target_link_libraries(day35_gauss_newton PRIVATE mini_vo Eigen3::Eigen)
+
 # --- Tests (optional) ---
 option(BUILD_TESTS "Build unit tests" OFF)
 if(BUILD_TESTS)

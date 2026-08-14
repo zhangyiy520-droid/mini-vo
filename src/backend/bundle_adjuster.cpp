@@ -39,6 +39,10 @@ BundleAdjustmentReport BundleAdjuster::optimize(
         report.message = "iteration counts are invalid";
         return report;
     }
+    if (!options.robust_policy.valid()) {
+        report.message = "robust policy options are invalid";
+        return report;
+    }
 
     GraphBuildOptions build_options;
     build_options.mode = GraphMode::FullBundleAdjustment;

@@ -1,6 +1,7 @@
 #include "mini_vo/backend/robust_policy.h"
 
 #include <iostream>
+#include <stdexcept>
 
 int main() {
     const mini_vo::CameraIntrinsics camera{500.0, 500.0, 320.0, 240.0};
@@ -48,9 +49,23 @@ int main() {
         std::cerr << "[FAIL] robust outlier classification is incorrect\n";
         return 1;
     }
+
+    mini_vo::RobustPolicyOptions invalid_options;
+    invalid_options.chi2_threshold = 0.0;
+    bool invalid_threshold_rejected = false;
+    try {
+        mini_vo::classifyOutliers(
+            *build.graph, invalid_options, true);
+    } catch (const std::invalid_argument&) {
+        invalid_threshold_rejected = true;
+    }
+    if (invalid_options.valid() || !invalid_threshold_rejected) {
+        std::cerr << "[FAIL] invalid robust policy was accepted\n";
+        return 1;
+    }
     std::cout << "[PASS] robust inliers=" << classification.inliers
               << " outliers=" << classification.outliers
               << " bad_chi2=" << classification.rejected.front().chi2
-              << '\n';
+              << " invalid_threshold_rejected=true\n";
     return 0;
 }

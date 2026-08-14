@@ -72,9 +72,27 @@ int main() {
         return 1;
     }
 
+    mini_vo::Map invalid_options_map = makeBundleScene(camera);
+    mini_vo::BundleAdjustmentOptions invalid_options = options;
+    invalid_options.robust_policy.huber_delta = 0.0;
+    const mini_vo::BundleAdjustmentReport invalid_report =
+        mini_vo::BundleAdjuster().optimize(
+            invalid_options_map, camera, invalid_options);
+    const cv::Mat original_third_pose =
+        (cv::Mat_<double>(3, 1) << -0.32, -0.04, 0.0);
+    const double unchanged_pose_error = cv::norm(
+        invalid_options_map.findKeyFrame(2)->tcw - original_third_pose);
+    if (invalid_report.success ||
+        invalid_report.message != "robust policy options are invalid" ||
+        unchanged_pose_error != 0.0) {
+        std::cerr << "[FAIL] invalid BA policy modified the map\n";
+        return 1;
+    }
+
     std::cout << "[PASS] BA chi2 " << report.initial_chi2
               << " -> " << report.final_chi2
               << " pose_error=" << pose_error
-              << " edges=" << report.edges << '\n';
+              << " edges=" << report.edges
+              << " invalid_policy_rejected=true\n";
     return 0;
 }

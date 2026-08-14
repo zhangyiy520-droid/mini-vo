@@ -7,6 +7,11 @@
 
 namespace mini_vo {
 
+bool RobustPolicyOptions::valid() const {
+    return std::isfinite(huber_delta) && huber_delta > 0.0 &&
+           std::isfinite(chi2_threshold) && chi2_threshold > 0.0;
+}
+
 void attachHuberKernels(G2OGraph& graph, double delta) {
     if (!std::isfinite(delta) || delta <= 0.0) {
         throw std::invalid_argument("Huber delta must be positive");
@@ -28,6 +33,10 @@ OutlierClassification classifyOutliers(
     G2OGraph& graph,
     const RobustPolicyOptions& options,
     bool deactivate_outliers) {
+    if (!std::isfinite(options.chi2_threshold) ||
+        options.chi2_threshold <= 0.0) {
+        throw std::invalid_argument("chi2 threshold must be positive");
+    }
     OutlierClassification result;
     for (const EdgeBinding& binding : graph.edge_bindings) {
         binding.edge->computeError();

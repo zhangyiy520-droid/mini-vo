@@ -10,6 +10,8 @@ namespace mini_vo {
 struct RobustPolicyOptions {
     double huber_delta = 2.447651936;
     double chi2_threshold = 5.991;
+
+    bool valid() const;
 };
 
 struct RejectedObservation {

@@ -26,6 +26,7 @@ add_library(mini_vo STATIC
     src/backend/bundle_adjuster.cpp
     src/backend/local_window_selector.cpp
     src/backend/local_bundle_adjuster.cpp
+    src/backend/backend.cpp
     src/camera/pinhole_camera.cpp
     src/backend/reprojection_error.cpp
 )
@@ -107,4 +108,8 @@ if(BUILD_TESTS)
     add_executable(test_local_bundle_adjuster test/test_local_bundle_adjuster.cpp)
     target_link_libraries(test_local_bundle_adjuster PRIVATE mini_vo)
     add_test(NAME test_local_bundle_adjuster COMMAND test_local_bundle_adjuster)
+
+    add_executable(test_backend test/test_backend.cpp)
+    target_link_libraries(test_backend PRIVATE mini_vo)
+    add_test(NAME test_backend COMMAND test_backend)
 endif()

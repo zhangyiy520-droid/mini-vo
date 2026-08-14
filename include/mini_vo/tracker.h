@@ -4,12 +4,18 @@
 
 namespace mini_vo {
 
+struct TriangulationReport {
+    bool keyframe_inserted = false;
+    KeyFrameId keyframe_id = 0;
+    std::size_t points_added = 0;
+};
+
 /**
  * 用地图点追踪当前帧（3D-2D PnP）。
  *
  * 流程：
  *   1. 当前帧 ORB 提取（2000 特征点）
- *   2. BF 匹配当前帧描述子 → state.map_descs（ratio test 0.8）
+ *   2. 从 state.map 获取跟踪快照并执行 BF ratio-test 匹配
  *   3. 收集 2D-3D 对应点
  *   4. solvePnPRansac → R, t
  *
@@ -34,11 +40,12 @@ bool track(const cv::Mat& img,
 /**
  * 在关键帧和当前帧之间三角化新地图点。
  */
-void triangulateNewPoints(VOSystem& vo,
-                          const cv::Mat& img,
-                          const std::vector<cv::KeyPoint>& kp,
-                          const cv::Mat& desc,
-                          const cv::Mat& R_cur,
-                          const cv::Mat& t_cur);
+TriangulationReport triangulateNewPoints(
+    VOSystem& vo,
+    const cv::Mat& img,
+    const std::vector<cv::KeyPoint>& kp,
+    const cv::Mat& desc,
+    const cv::Mat& R_cur,
+    const cv::Mat& t_cur);
 
 } // namespace mini_vo

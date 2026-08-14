@@ -14,7 +14,7 @@ namespace mini_vo {
  *   4. DLT 三角化地图点
  *   5. 中值深度离群过滤 + 重投影误差检查
  *
- * 成功时：填充 vo.R_cw / vo.t_cw / vo.map_points / vo.map_descs，
+ * 成功时：填充 vo.R_cw / vo.t_cw / vo.map，
  *         并设置 prev_* / kf_* 状态供后续跟踪。
  *
  * kf_* 固定为第一帧（世界原点），后续三角化均以此为参考做大基线三角化。

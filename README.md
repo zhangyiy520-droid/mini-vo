@@ -8,12 +8,13 @@
 
 ## 当前状态
 
-仓库包含两层实现：
+仓库包含一条共享结构化 `Map` 的前后端主链路：
 
-1. **实时 VO 主链路**：双帧初始化、3D–2D PnP 跟踪、增量三角化、丢失重初始化、TUM 轨迹和 PLY 地图输出；
-2. **结构化 BA 后端**：`Map/KeyFrame/MapPoint/Observation`、g2o、三种 BA、Huber/χ² 外点处理和 Local BA。
+1. **实时前端**：双帧初始化、3D–2D PnP 跟踪、增量三角化、丢失重初始化、TUM 轨迹和 PLY 地图输出；
+2. **结构化后端**：`Map/KeyFrame/MapPoint/Observation`、g2o、三种 BA、Huber/χ² 外点处理和 Local BA；
+3. **Backend seam**：新关键帧只通过 `Backend::processKeyFrame()` 进入 Pose BA 和 Local BA。
 
-BA 后端已实现并通过自动测试，但尚未接入实时 `processFrame()`。当前 `vo_bin` 运行时主要使用 `VOSystem` 的扁平地图结构。
+实时前端与 BA 后端现在共享同一个 `Map`。三角化插入新关键帧后，`processFrame()` 会调用 Backend，并把优化后的当前位姿同步回实时轨迹。
 
 ## 功能概览
 
@@ -30,7 +31,7 @@ BA 后端已实现并通过自动测试，但尚未接入实时 `processFrame()`
 - Pose-only、Point-only 和联合 Bundle Adjustment；
 - Huber 核、χ² 与正深度外点分类；
 - 共视局部窗口和 Local BA；
-- 14 项 CTest 自动测试。
+- 15 项 CTest 自动测试。
 
 ## 系统架构
 
@@ -42,7 +43,7 @@ flowchart TD
     State --> Track["PnP 跟踪"]
     State --> Reinit["LOST 重初始化"]
     Track --> Triangulate["增量三角化"]
-    Triangulate --> FlatMap["map_points / map_descs"]
+    Triangulate --> FlatMap["Map / Observation"]
     Track --> Output["trajectory.txt / map.ply"]
 
     Structured["Map / Observation"] --> Graph["g2o Graph Builder"]
@@ -92,6 +93,7 @@ PnP 失败后进入 `LOST`。系统冻结关键帧，等待当前帧与该关键
 
 | 模块 | 接口 | 用途 |
 |---|---|---|
+| 后端入口 | [`backend.h`](include/mini_vo/backend/backend.h) | 接收新关键帧，隐藏 Pose BA 与 Local BA 调度 |
 | g2o 构图 | [`g2o_graph_builder.h`](include/mini_vo/backend/g2o_graph_builder.h) | 从 Map 创建顶点、边和 Observation 映射 |
 | 位姿优化 | [`pose_optimizer.h`](include/mini_vo/backend/pose_optimizer.h) | 固定地图点，只优化一个 `Tcw` |
 | 地图点优化 | [`point_optimizer.h`](include/mini_vo/backend/point_optimizer.h) | 固定位姿，只优化一个 `Pw` |
@@ -157,7 +159,7 @@ mini-vo/
 │   ├── camera/
 │   ├── core/
 │   └── backend/
-└── test/                         # 14 个测试
+└── test/                         # 15 个测试
 ```
 
 ## 依赖
@@ -233,7 +235,7 @@ cmake --build build -j4
 ctest --test-dir build --output-on-failure
 ```
 
-当前共 14 项：
+当前共 15 项：
 
 | 层次 | 测试 |
 |---|---|
@@ -244,10 +246,11 @@ ctest --test-dir build --output-on-failure
 | 单变量 BA | `test_pose_optimizer`, `test_point_optimizer` |
 | 鲁棒联合 BA | `test_robust_policy`, `test_bundle_adjuster` |
 | Local BA | `test_local_window_selector`, `test_local_bundle_adjuster` |
+| Backend seam | `test_backend` |
 
 ## 当前限制
 
-- 实时 `VOSystem` 与结构化 `Map` 尚未统一，BA 后端未接入 `processFrame()`；
+- Backend 已接入新关键帧，但尚未加入回环检测和位姿图优化；
 - `config/euroc.yaml` 尚未被 `vo_bin` 读取，EuRoC/TUM 内参仍硬编码在 `main.cpp`；
 - 单目系统没有外部尺度源；
 - 尚无回环检测、Sim(3) 验证和位姿图优化；

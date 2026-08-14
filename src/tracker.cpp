@@ -4,8 +4,18 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace mini_vo {
+namespace {
+
+struct TriangulatedCandidate {
+    cv::Point3d position;
+    int reference_feature_index = 0;
+    int current_feature_index = 0;
+};
+
+}  // namespace
 
 bool track(const cv::Mat& img,
            const cv::Mat& K,
@@ -23,10 +33,16 @@ bool track(const cv::Mat& img,
     cv::Mat desc;
     orb->detectAndCompute(img, cv::Mat(), kp, desc);
 
+    const TrackingMapSnapshot snapshot = state.map.trackingSnapshot();
+    if (desc.empty() || !snapshot.valid() ||
+        snapshot.descriptors.rows < 2) {
+        return false;
+    }
+
     // --- 2. 当前帧描述子 → 地图描述子匹配 ---
     cv::BFMatcher matcher(cv::NORM_HAMMING);
     std::vector<std::vector<cv::DMatch>> knn;
-    matcher.knnMatch(desc, state.map_descs, knn, 2);
+    matcher.knnMatch(desc, snapshot.descriptors, knn, 2);
 
     // --- 3. ratio test + 收集 2D-3D 对应点 ---
     std::vector<cv::Point2f> pts2D;
@@ -34,9 +50,9 @@ bool track(const cv::Mat& img,
     for (const auto& m : knn) {
         if (m[0].distance < 0.8f * m[1].distance) {
             int idx = m[0].trainIdx;
-            if (idx >= (int)state.map_points.size()) continue;
+            if (idx >= static_cast<int>(snapshot.points.size())) continue;
             pts2D.push_back(kp[m[0].queryIdx].pt);
-            pts3D.push_back(state.map_points[idx]);
+            pts3D.push_back(snapshot.points[idx]);
         }
     }
 
@@ -46,7 +62,7 @@ bool track(const cv::Mat& img,
 		  << "matches: " << pts2D.size()
 		  << "inliner = 0"
 		  << "result=NOT_ENOUGH_MATCHES"
-		  << "map_points= " << state.map_points.size()
+		  << "map_points= " << snapshot.points.size()
 		  << std::endl;
 
         return false;
@@ -62,7 +78,7 @@ bool track(const cv::Mat& img,
           << " frame=" << state.frame_count
           << " matches=" << pts2D.size()
           << " inliers=" << n_inliers
-          << " map_points=" << state.map_points.size()
+          << " map_points=" << snapshot.points.size()
           << " result="
           << ((!ok || n_inliers < 10) ? "PNP_FAILED" : "OK")
           << std::endl;
@@ -80,11 +96,16 @@ bool track(const cv::Mat& img,
     return true;
 }
 
-void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
-                          const std::vector<cv::KeyPoint>& kp,
-                          const cv::Mat& desc,
-                          const cv::Mat& R_cur, const cv::Mat& t_cur)
+TriangulationReport triangulateNewPoints(
+    VOSystem& vo, const cv::Mat& img,
+    const std::vector<cv::KeyPoint>& kp,
+    const cv::Mat& desc,
+    const cv::Mat& R_cur, const cv::Mat& t_cur)
 {
+    TriangulationReport report;
+    if (vo.kf_desc.empty() || desc.empty()) {
+        return report;
+    }
     // --- 1. 关键帧 → 当前帧匹配 ---
     cv::BFMatcher matcher(cv::NORM_HAMMING);
     std::vector<std::vector<cv::DMatch>> knn;
@@ -100,7 +121,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
         }
     }
     std::cout << "[tri] 匹配: " << good.size() << std::endl;
-    if (good.size() < 30) return;
+    if (good.size() < 30) return report;
 
     // --- 2. 投影矩阵 ---
     cv::Mat Rt1, Rt2;
@@ -124,7 +145,8 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
 
     // --- 4. 自适应距离阈值（中值 ×5，下界 ×0.1） ---
     std::vector<double> zs;
-    for (const auto& p : vo.map_points) {
+    const TrackingMapSnapshot snapshot = vo.map.trackingSnapshot();
+    for (const auto& p : snapshot.points) {
         double d = std::sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
         if (d > 0) zs.push_back(d);
     }
@@ -138,6 +160,7 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
 
     // --- 5. 质量过滤 ---
     int added = 0, rej_depth = 0, rej_parallax = 0, rej_dist = 0, rej_reproj = 0;
+    std::vector<TriangulatedCandidate> candidates;
     for (int i = 0; i < pts4D.cols; i++) {
         cv::Mat c = pts4D.col(i);
         float W = c.at<float>(3);
@@ -173,16 +196,75 @@ void triangulateNewPoints(VOSystem& vo, const cv::Mat& /*img*/,
         double e2 = std::sqrt(std::pow(u2-pts_cur[i].x,2)+std::pow(v2-pts_cur[i].y,2));
         if (std::max(e1,e2) > 3.0) { rej_reproj++; continue; }
 
-        vo.map_points.push_back(cv::Point3f(X,Y,Z));
-        vo.map_descs.push_back(desc.row(good[i].trainIdx));
-        added++;
+        candidates.push_back(
+            {{X, Y, Z}, good[i].queryIdx, good[i].trainIdx});
+    }
+    if (!candidates.empty()) {
+        Map updated_map = vo.map;
+        KeyFrame current_keyframe;
+        current_keyframe.id = vo.next_keyframe_id;
+        current_keyframe.image = img;
+        current_keyframe.keypoints = kp;
+        current_keyframe.descriptors = desc;
+        current_keyframe.Rcw = R_cur;
+        current_keyframe.tcw = t_cur;
+        if (!updated_map.addKeyFrame(current_keyframe)) {
+            return report;
+        }
+
+        for (std::size_t index = 0; index < candidates.size(); ++index) {
+            const TriangulatedCandidate& candidate = candidates[index];
+            MapPoint point;
+            point.id = vo.next_map_point_id + index;
+            point.position_world = candidate.position;
+            point.descriptor =
+                desc.row(candidate.current_feature_index);
+            if (!updated_map.addMapPoint(point)) {
+                return report;
+            }
+
+            Observation reference_observation;
+            reference_observation.keyframe_id = vo.reference_keyframe_id;
+            reference_observation.map_point_id = point.id;
+            reference_observation.feature_index =
+                candidate.reference_feature_index;
+            reference_observation.pixel =
+                vo.kf_kp[candidate.reference_feature_index].pt;
+            reference_observation.octave =
+                vo.kf_kp[candidate.reference_feature_index].octave;
+
+            Observation current_observation;
+            current_observation.keyframe_id = current_keyframe.id;
+            current_observation.map_point_id = point.id;
+            current_observation.feature_index =
+                candidate.current_feature_index;
+            current_observation.pixel =
+                kp[candidate.current_feature_index].pt;
+            current_observation.octave =
+                kp[candidate.current_feature_index].octave;
+            if (!updated_map.addObservation(reference_observation) ||
+                !updated_map.addObservation(current_observation)) {
+                return report;
+            }
+        }
+        if (!updated_map.validate()) {
+            return report;
+        }
+        vo.map = std::move(updated_map);
+        added = static_cast<int>(candidates.size());
+        report.keyframe_inserted = true;
+        report.keyframe_id = current_keyframe.id;
+        report.points_added = candidates.size();
+        ++vo.next_keyframe_id;
+        vo.next_map_point_id += candidates.size();
     }
     std::cout << "[tri] 新增:" << added
               << " 拒绝(深度:" << rej_depth
               << " 视差:" << rej_parallax
               << " 距离:" << rej_dist
               << " 重投影:" << rej_reproj
-              << ") 总计:" << vo.map_points.size() << std::endl;
+              << ") 总计:" << vo.map.mapPointCount() << std::endl;
+    return report;
 }
 
 } // namespace mini_vo

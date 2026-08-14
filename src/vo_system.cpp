@@ -1,6 +1,7 @@
 #include "mini_vo/vo_system.h"
 #include "mini_vo/initializer.h"
 #include "mini_vo/tracker.h"
+#include "mini_vo/backend/backend.h"
 
 #include <opencv2/opencv.hpp>
 #include <iostream>
@@ -73,14 +74,15 @@ void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize, double times
             vo.trajectory_t.push_back(vo.t_cw.clone());
             vo.trajectory_ts.push_back(timestamp);
             std::cout << "[frame " << vo.frame_count << "] 初始化成功 "
-                      << "地图点:" << vo.map_points.size() << std::endl;
+                      << "地图点:" << vo.map.mapPointCount() << std::endl;
 
             if (visualize) {
                 cv::Mat init_vis;
                 cv::cvtColor(img, init_vis, cv::COLOR_GRAY2BGR);
                 cv::drawKeypoints(init_vis, kp, init_vis, cv::Scalar(0, 255, 0),
                                   cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-                std::string label = "初始化成功  地图点:" + std::to_string(vo.map_points.size());
+                std::string label = "初始化成功  地图点:" +
+                                    std::to_string(vo.map.mapPointCount());
                 cv::putText(init_vis, label, cv::Point(10, 25),
                             cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
                 saveDebugImage(init_vis, vo.frame_count, "init_ok");
@@ -150,7 +152,36 @@ void processFrame(VOSystem& vo, const cv::Mat& img, bool visualize, double times
                 std::vector<cv::KeyPoint> kp_tri;
                 cv::Mat desc_tri;
                 orb->detectAndCompute(img, cv::Mat(), kp_tri, desc_tri);
-                triangulateNewPoints(vo, img, kp_tri, desc_tri, R, t);
+                const TriangulationReport triangulation =
+                    triangulateNewPoints(
+                        vo, img, kp_tri, desc_tri, R, t);
+                if (triangulation.keyframe_inserted) {
+                    const CameraIntrinsics camera{
+                        vo.K.at<double>(0, 0),
+                        vo.K.at<double>(1, 1),
+                        vo.K.at<double>(0, 2),
+                        vo.K.at<double>(1, 2)};
+                    const BackendReport backend =
+                        Backend().processKeyFrame(
+                            vo.map, triangulation.keyframe_id, camera);
+                    if (backend.pose_optimized) {
+                        const KeyFrame* optimized = vo.map.findKeyFrame(
+                            triangulation.keyframe_id);
+                        vo.R_cw = optimized->Rcw.clone();
+                        vo.t_cw = optimized->tcw.clone();
+                        vo.trajectory_R.back() = vo.R_cw.clone();
+                        vo.trajectory_t.back() = vo.t_cw.clone();
+                    }
+                    std::cout << "[BACKEND] keyframe="
+                              << triangulation.keyframe_id
+                              << " pose=" << backend.pose_optimized
+                              << " local_ba="
+                              << backend.local_ba_optimized
+                              << " chi2=" << backend.initial_chi2
+                              << "->" << backend.final_chi2
+                              << " message=" << backend.message
+                              << std::endl;
+                }
                 vo.last_keyframe = vo.frame_count;
             }
 

@@ -29,6 +29,14 @@ struct MapPoint {
     bool bad = false;
 };
 
+struct TrackingMapSnapshot {
+    std::vector<MapPointId> map_point_ids;
+    std::vector<cv::Point3f> points;
+    cv::Mat descriptors;
+
+    bool valid() const;
+};
+
 class Map {
 public:
     bool addKeyFrame(const KeyFrame& keyframe);
@@ -46,6 +54,7 @@ public:
                                bool outlier);
 
     const ObservationStore& observations() const;
+    TrackingMapSnapshot trackingSnapshot() const;
     std::size_t keyFrameCount() const;
     std::size_t mapPointCount() const;
     bool validate() const;

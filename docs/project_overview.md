@@ -12,12 +12,13 @@
 - g2o：非线性图优化；
 - CMake/CTest：构建和自动测试。
 
-仓库目前同时包含两层实现：
+仓库目前包含一条共享结构化 `Map` 的前后端链路：
 
-1. **实时 VO 主链路**：使用 `VOSystem` 的扁平状态，完成初始化、PnP 跟踪、增量三角化、丢失重初始化和轨迹/点云输出；
-2. **结构化地图与 BA 后端**：使用 `Map`、`KeyFrame`、`MapPoint`、`Observation`，提供重投影、三种 BA 模式、鲁棒外点分类、局部窗口和 Local BA。
+1. **实时 VO 前端**：完成初始化、PnP 跟踪、增量三角化、丢失重初始化和轨迹/点云输出；
+2. **结构化地图与 BA 后端**：使用 `Map`、`KeyFrame`、`MapPoint`、`Observation`，提供重投影、三种 BA 模式、鲁棒外点分类、局部窗口和 Local BA；
+3. **Backend seam**：新关键帧通过一个 `processKeyFrame()` interface 进入后端，主循环不直接依赖各优化器。
 
-这两层已经分别实现并测试，但 BA 后端尚未接入实时 `processFrame()` 主循环。理解这一点很重要：仓库“有 BA 模块”，但当前 `vo_bin` 运行时仍主要走传统 VO 主链路。
+初始化和三角化现在直接写入同一个 `Map`。新关键帧插入后，实时 `processFrame()` 会调用 Backend，并把优化后的当前位姿同步回轨迹。
 
 ## 2. 仓库结构
 
@@ -50,7 +51,7 @@ mini-vo/
 │   ├── camera/
 │   ├── core/
 │   └── backend/
-└── test/                            # 14 个 CTest 测试目标
+└── test/                            # 15 个 CTest 测试目标
 ```
 
 ## 3. 构建产物
@@ -169,23 +170,22 @@ vo.frame_count - vo.last_keyframe >= 1
 
 匹配不足或 PnP 内点不足时返回失败，状态机进入 `LOST`。
 
-新点由 `triangulateNewPoints()` 生成。当前实现使用初始化关键帧作为固定参考，通过较大基线进行三角化，并把通过质量检查的点追加到扁平 `map_points/map_descs`。
+新点由 `triangulateNewPoints()` 生成。当前实现使用初始化关键帧作为固定参考，通过较大基线进行三角化；通过质量检查的新关键帧、地图点和两帧观测会以事务方式写入统一 `Map`。
 
-## 8. 两套地图表示
+## 8. 统一地图与前端缓存
 
-### 实时主链路：`VOSystem`
+### 实时状态：`VOSystem`
 
-[`VOSystem`](../include/mini_vo/types.h) 直接保存：
+[`VOSystem`](../include/mini_vo/types.h) 保存当前帧缓存、轨迹和唯一的结构化 `Map`：
 
 - 当前和上一帧位姿；
 - 关键帧图像、特征与位姿；
-- `std::vector<cv::Point3f> map_points`；
-- 与地图点同行对应的 `map_descs`；
+- 当前 `Map` 及关键帧/地图点 ID 分配状态；
 - 轨迹旋转、平移和时间戳。
 
-结构简单，适合教学和快速运行，但不显式保存“哪个关键帧观测了哪个地图点”。
+前端匹配通过 `Map::trackingSnapshot()` 获取稳定排序的 3D 点和 descriptor 行，不访问 Map 内部容器。
 
-### BA 后端：`Map`
+### 唯一地图事实源：`Map`
 
 [`Map`](../include/mini_vo/core/map.h) 使用结构化实体：
 
@@ -332,7 +332,7 @@ Local BA 由两个模块组成：
 | `max_fixed_keyframes` | `10` |
 | `minimum_shared_points` | `5` |
 
-Local BA 后端已经通过测试，但当前实时 `VOSystem` 使用另一套扁平地图结构，因此尚未在 `processFrame()` 中调用。
+Local BA 已隐藏在 `Backend::processKeyFrame()` 内部，并在新关键帧成功插入后由 `processFrame()` 调用。
 
 ## 14. 结果写回安全策略
 
@@ -419,7 +419,7 @@ g2o: core, types_sba, solver_dense
 ctest --test-dir build --output-on-failure
 ```
 
-当前共 14 项：
+当前共 15 项：
 
 | 层次 | 测试 |
 |---|---|
@@ -430,6 +430,7 @@ ctest --test-dir build --output-on-failure
 | 单变量优化 | `test_pose_optimizer`, `test_point_optimizer` |
 | 鲁棒与联合 BA | `test_robust_policy`, `test_bundle_adjuster` |
 | Local BA | `test_local_window_selector`, `test_local_bundle_adjuster` |
+| Backend seam | `test_backend` |
 
 测试成功只能证明这些受控场景通过；真实数据集仍需要轨迹、地图和日志量化验证。
 
@@ -454,13 +455,13 @@ ctest --test-dir build --output-on-failure
 - PoseOnly、PointOnly 和联合 BA；
 - Huber、χ²、正深度外点分类；
 - 共视局部窗口和 Local BA；
-- 14 项自动测试。
+- 15 项自动测试。
 
 ## 21. 当前限制与后续接线
 
-### 实时 VO 与 BA 后端尚未统一
+### 回环尚未接入 Backend
 
-`VOSystem` 使用扁平地图，而 BA 使用结构化 `Map`。目前缺少稳定的转换/统一层，因此 Pose BA、Point BA 和 Local BA 没有在实时帧处理中自动执行。
+Backend 目前隐藏 Pose BA 和 Local BA，尚未包含回环候选检测、几何验证、位姿图优化和地图校正。
 
 ### 相机配置仍硬编码
 
@@ -524,5 +525,5 @@ ctest --test-dir build --output-on-failure
 - [ ] 三种 g2o 优化模式测试通过；
 - [ ] Gauge 与鲁棒外点策略测试通过；
 - [ ] Local BA 窗口和写回测试通过；
-- [ ] 完整 CTest 14/14 通过；
-- [ ] 文档明确区分已实现后端与已接入实时主链路的能力。
+- [ ] 完整 CTest 15/15 通过；
+- [ ] 实时前端和 Backend 通过统一 Map 交换关键帧与观测。

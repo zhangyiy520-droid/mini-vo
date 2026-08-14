@@ -4,6 +4,8 @@
 #include <opencv2/core.hpp>
 #include <opencv2/features2d.hpp>
 
+#include "mini_vo/core/map.h"
+
 namespace mini_vo {
 
 enum class VOStatus { UNINITIALIZED, TRACKING, LOST };
@@ -14,8 +16,10 @@ struct VOSystem {
     cv::Mat R_cw;                             // 当前旋转（世界 → 相机）
     cv::Mat t_cw;                             // 当前平移
 
-    std::vector<cv::Point3f> map_points;       // 3D 地图点（世界坐标系）
-    cv::Mat map_descs;                        // 地图点描述子
+    Map map;                                  // 关键帧、地图点与观测的唯一事实源
+    KeyFrameId reference_keyframe_id = 0;
+    KeyFrameId next_keyframe_id = 0;
+    MapPointId next_map_point_id = 0;
 
     cv::Mat prev_img;
     std::vector<cv::KeyPoint> prev_kp;

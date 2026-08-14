@@ -72,12 +72,6 @@ std::uint64_t observationKey(KeyFrameId keyframe_id,
 
 }  // namespace
 
-bool CameraIntrinsics::valid() const {
-    return std::isfinite(fx) && std::isfinite(fy) &&
-           std::isfinite(cx) && std::isfinite(cy) &&
-           fx > 0.0 && fy > 0.0;
-}
-
 EdgeReprojectionPoseOnly::EdgeReprojectionPoseOnly(
     const Eigen::Vector3d& point_world,
     const CameraIntrinsics& camera)

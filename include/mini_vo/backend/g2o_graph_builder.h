@@ -14,18 +14,10 @@
 #include <g2o/core/sparse_optimizer.h>
 #include <g2o/types/sba/types_six_dof_expmap.h>
 
+#include "mini_vo/camera/camera_intrinsics.h"
 #include "mini_vo/core/map.h"
 
 namespace mini_vo {
-
-struct CameraIntrinsics {
-    double fx = 0.0;
-    double fy = 0.0;
-    double cx = 0.0;
-    double cy = 0.0;
-
-    bool valid() const;
-};
 
 enum class GraphMode {
     PoseOnly,

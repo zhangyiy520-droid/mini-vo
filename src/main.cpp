@@ -158,7 +158,9 @@ int main(int argc, char** argv)
 
     // --- 汇总 ---
     std::cout << "\n========== 完成 ==========" << std::endl;
-    std::cout << "地图点: " << vo.map_points.size() << std::endl;
+    const mini_vo::TrackingMapSnapshot final_map =
+        vo.map.trackingSnapshot();
+    std::cout << "地图点: " << final_map.points.size() << std::endl;
     std::cout << "轨迹: " << vo.trajectory_R.size() << "/" << files.size()
               << " 帧 (" << (100.0 * vo.trajectory_R.size() / files.size())
               << "%)" << std::endl;
@@ -169,7 +171,7 @@ int main(int argc, char** argv)
     } else {
         mini_vo::saveTrajectory("trajectory.txt", vo.trajectory_R, vo.trajectory_t);
     }
-    mini_vo::saveMapPLY("map.ply", vo.map_points);
+    mini_vo::saveMapPLY("map.ply", final_map.points);
 
     if (visualize) std::cout << "调试图片已保存到 debug/" << std::endl;
 

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace mini_vo {
 
@@ -83,7 +84,7 @@ bool initialize(VOSystem& vo, const cv::Mat& img1, const cv::Mat& img2,
 
     // --- 7. 质量过滤（用 iorig[i] 保证描述子索引正确） ---
     std::vector<cv::Point3f> pts3D;
-    cv::Mat descs_out;
+    std::vector<int> retained_good_indices;
     for (int i = 0; i < pts4D.cols; i++) {
         cv::Mat c = pts4D.col(i);
         float W = c.at<float>(3);
@@ -105,7 +106,7 @@ bool initialize(VOSystem& vo, const cv::Mat& img1, const cv::Mat& img2,
         if (std::max(e1,e2) > 3.0) continue;
 
         pts3D.push_back(cv::Point3f(X,Y,Z));
-        descs_out.push_back(desc2.row(good[iorig[i]].trainIdx));
+        retained_good_indices.push_back(iorig[i]);
     }
     std::cout << "[init] 地图点: " << pts3D.size() << std::endl;
     if (pts3D.size() < 20) return false;
@@ -113,8 +114,64 @@ bool initialize(VOSystem& vo, const cv::Mat& img1, const cv::Mat& img2,
     // --- 8. 写入状态 ---
     vo.R_cw = R.clone();
     vo.t_cw = t.clone();
-    vo.map_points = pts3D;
-    vo.map_descs = descs_out.clone();
+    Map initialized_map;
+    KeyFrame first_keyframe;
+    first_keyframe.id = 0;
+    first_keyframe.image = img1;
+    first_keyframe.keypoints = kp1;
+    first_keyframe.descriptors = desc1;
+    first_keyframe.Rcw = cv::Mat::eye(3, 3, CV_64F);
+    first_keyframe.tcw = cv::Mat::zeros(3, 1, CV_64F);
+    first_keyframe.fixed = true;
+
+    KeyFrame second_keyframe;
+    second_keyframe.id = 1;
+    second_keyframe.image = img2;
+    second_keyframe.keypoints = kp2;
+    second_keyframe.descriptors = desc2;
+    second_keyframe.Rcw = R;
+    second_keyframe.tcw = t;
+    if (!initialized_map.addKeyFrame(first_keyframe) ||
+        !initialized_map.addKeyFrame(second_keyframe)) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < pts3D.size(); ++index) {
+        const cv::DMatch& match = good[retained_good_indices[index]];
+        MapPoint point;
+        point.id = index;
+        point.position_world = cv::Point3d(
+            pts3D[index].x, pts3D[index].y, pts3D[index].z);
+        point.descriptor = desc2.row(match.trainIdx);
+        if (!initialized_map.addMapPoint(point)) {
+            return false;
+        }
+
+        Observation first_observation;
+        first_observation.keyframe_id = first_keyframe.id;
+        first_observation.map_point_id = point.id;
+        first_observation.feature_index = match.queryIdx;
+        first_observation.pixel = kp1[match.queryIdx].pt;
+        first_observation.octave = kp1[match.queryIdx].octave;
+
+        Observation second_observation;
+        second_observation.keyframe_id = second_keyframe.id;
+        second_observation.map_point_id = point.id;
+        second_observation.feature_index = match.trainIdx;
+        second_observation.pixel = kp2[match.trainIdx].pt;
+        second_observation.octave = kp2[match.trainIdx].octave;
+        if (!initialized_map.addObservation(first_observation) ||
+            !initialized_map.addObservation(second_observation)) {
+            return false;
+        }
+    }
+    if (!initialized_map.validate()) {
+        return false;
+    }
+    vo.map = std::move(initialized_map);
+    vo.reference_keyframe_id = first_keyframe.id;
+    vo.next_keyframe_id = 2;
+    vo.next_map_point_id = pts3D.size();
 
     vo.prev_img = img2.clone();
     vo.prev_kp = kp2;

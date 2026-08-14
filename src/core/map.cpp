@@ -1,5 +1,6 @@
 #include "mini_vo/core/map.h"
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -19,6 +20,11 @@ bool isPoseShapeValid(const cv::Mat& Rcw, const cv::Mat& tcw) {
 }
 
 }  // namespace
+
+bool TrackingMapSnapshot::valid() const {
+    return map_point_ids.size() == points.size() &&
+           descriptors.rows == static_cast<int>(points.size());
+}
 
 bool Map::addKeyFrame(const KeyFrame& input) {
     if (keyframes_.count(input.id) != 0 ||
@@ -40,7 +46,7 @@ bool Map::addKeyFrame(const KeyFrame& input) {
 bool Map::addMapPoint(const MapPoint& input) {
     if (map_points_.count(input.id) != 0 ||
         !isFinitePoint(input.position_world) ||
-        input.descriptor.empty()) {
+        input.descriptor.empty() || input.descriptor.rows != 1) {
         return false;
     }
 
@@ -107,6 +113,31 @@ bool Map::setObservationOutlier(KeyFrameId keyframe_id,
 
 const ObservationStore& Map::observations() const {
     return observations_;
+}
+
+TrackingMapSnapshot Map::trackingSnapshot() const {
+    TrackingMapSnapshot snapshot;
+    std::vector<MapPointId> ids;
+    ids.reserve(map_points_.size());
+    for (const auto& item : map_points_) {
+        if (!item.second.bad) {
+            ids.push_back(item.first);
+        }
+    }
+    std::sort(ids.begin(), ids.end());
+
+    snapshot.map_point_ids.reserve(ids.size());
+    snapshot.points.reserve(ids.size());
+    for (MapPointId id : ids) {
+        const MapPoint& point = map_points_.at(id);
+        snapshot.map_point_ids.push_back(id);
+        snapshot.points.emplace_back(
+            static_cast<float>(point.position_world.x),
+            static_cast<float>(point.position_world.y),
+            static_cast<float>(point.position_world.z));
+        snapshot.descriptors.push_back(point.descriptor);
+    }
+    return snapshot;
 }
 
 std::size_t Map::keyFrameCount() const {

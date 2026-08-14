@@ -24,20 +24,12 @@ bool ObservationStore::add(const Observation& observation) {
     if (!isFinitePixel(observation.pixel) || observation.octave < 0) {
         return false;
     }
-
-    const auto duplicate = std::find_if(
-        observations_.begin(), observations_.end(),
-        [&](const Observation& current) {
-            return sameLink(current,
-                            observation.keyframe_id,
-                            observation.map_point_id);
-        });
-
-    if (duplicate != observations_.end()) {
+    if (contains(observation.keyframe_id, observation.map_point_id)) {
         return false;
     }
 
     observations_.push_back(observation);
+    links_[observation.keyframe_id].insert(observation.map_point_id);
     return true;
 }
 
@@ -52,7 +44,17 @@ bool ObservationStore::erase(KeyFrameId keyframe_id,
                                            map_point_id);
                        }),
         observations_.end());
-    return observations_.size() != old_size;
+    if (observations_.size() == old_size) {
+        return false;
+    }
+    const auto keyframe = links_.find(keyframe_id);
+    if (keyframe != links_.end()) {
+        keyframe->second.erase(map_point_id);
+        if (keyframe->second.empty()) {
+            links_.erase(keyframe);
+        }
+    }
+    return true;
 }
 
 bool ObservationStore::setOutlier(KeyFrameId keyframe_id,
@@ -65,6 +67,13 @@ bool ObservationStore::setOutlier(KeyFrameId keyframe_id,
         }
     }
     return false;
+}
+
+bool ObservationStore::contains(KeyFrameId keyframe_id,
+                                MapPointId map_point_id) const {
+    const auto keyframe = links_.find(keyframe_id);
+    return keyframe != links_.end() &&
+           keyframe->second.count(map_point_id) != 0;
 }
 
 std::vector<Observation> ObservationStore::byKeyFrame(
@@ -98,17 +107,19 @@ std::size_t ObservationStore::size() const {
 }
 
 bool ObservationStore::validate() const {
+    std::size_t indexed_links = 0;
+    for (const auto& keyframe : links_) {
+        indexed_links += keyframe.second.size();
+    }
+    if (indexed_links != observations_.size()) {
+        return false;
+    }
     for (std::size_t i = 0; i < observations_.size(); ++i) {
         const auto& observation = observations_[i];
-        if (!isFinitePixel(observation.pixel) || observation.octave < 0) {
+        if (!isFinitePixel(observation.pixel) || observation.octave < 0 ||
+            !contains(observation.keyframe_id,
+                      observation.map_point_id)) {
             return false;
-        }
-        for (std::size_t j = i + 1; j < observations_.size(); ++j) {
-            if (sameLink(observations_[j],
-                         observation.keyframe_id,
-                         observation.map_point_id)) {
-                return false;
-            }
         }
     }
     return true;

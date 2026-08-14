@@ -33,7 +33,7 @@ bool track(const cv::Mat& img,
     cv::Mat desc;
     orb->detectAndCompute(img, cv::Mat(), kp, desc);
 
-    const TrackingMapSnapshot snapshot = state.map.trackingSnapshot();
+    const TrackingMapSnapshot& snapshot = state.map.trackingSnapshot();
     if (desc.empty() || !snapshot.valid() ||
         snapshot.descriptors.rows < 2) {
         return false;
@@ -145,7 +145,7 @@ TriangulationReport triangulateNewPoints(
 
     // --- 4. 自适应距离阈值（中值 ×5，下界 ×0.1） ---
     std::vector<double> zs;
-    const TrackingMapSnapshot snapshot = vo.map.trackingSnapshot();
+    const TrackingMapSnapshot& snapshot = vo.map.trackingSnapshot();
     for (const auto& p : snapshot.points) {
         double d = std::sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
         if (d > 0) zs.push_back(d);
@@ -200,7 +200,6 @@ TriangulationReport triangulateNewPoints(
             {{X, Y, Z}, good[i].queryIdx, good[i].trainIdx});
     }
     if (!candidates.empty()) {
-        Map updated_map = vo.map;
         KeyFrame current_keyframe;
         current_keyframe.id = vo.next_keyframe_id;
         current_keyframe.image = img;
@@ -208,10 +207,11 @@ TriangulationReport triangulateNewPoints(
         current_keyframe.descriptors = desc;
         current_keyframe.Rcw = R_cur;
         current_keyframe.tcw = t_cur;
-        if (!updated_map.addKeyFrame(current_keyframe)) {
-            return report;
-        }
 
+        std::vector<MapPoint> new_points;
+        std::vector<Observation> new_observations;
+        new_points.reserve(candidates.size());
+        new_observations.reserve(candidates.size() * 2U);
         for (std::size_t index = 0; index < candidates.size(); ++index) {
             const TriangulatedCandidate& candidate = candidates[index];
             MapPoint point;
@@ -219,9 +219,7 @@ TriangulationReport triangulateNewPoints(
             point.position_world = candidate.position;
             point.descriptor =
                 desc.row(candidate.current_feature_index);
-            if (!updated_map.addMapPoint(point)) {
-                return report;
-            }
+            new_points.push_back(point);
 
             Observation reference_observation;
             reference_observation.keyframe_id = vo.reference_keyframe_id;
@@ -242,15 +240,13 @@ TriangulationReport triangulateNewPoints(
                 kp[candidate.current_feature_index].pt;
             current_observation.octave =
                 kp[candidate.current_feature_index].octave;
-            if (!updated_map.addObservation(reference_observation) ||
-                !updated_map.addObservation(current_observation)) {
-                return report;
-            }
+            new_observations.push_back(reference_observation);
+            new_observations.push_back(current_observation);
         }
-        if (!updated_map.validate()) {
+        if (!vo.map.insertKeyFrameBatch(current_keyframe, new_points,
+                                        new_observations)) {
             return report;
         }
-        vo.map = std::move(updated_map);
         added = static_cast<int>(candidates.size());
         report.keyframe_inserted = true;
         report.keyframe_id = current_keyframe.id;

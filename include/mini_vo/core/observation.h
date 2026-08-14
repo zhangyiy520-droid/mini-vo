@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -27,6 +29,7 @@ public:
     bool setOutlier(KeyFrameId keyframe_id,
                     MapPointId map_point_id,
                     bool outlier);
+    bool contains(KeyFrameId keyframe_id, MapPointId map_point_id) const;
 
     std::vector<Observation> byKeyFrame(KeyFrameId keyframe_id) const;
     std::vector<Observation> byMapPoint(MapPointId map_point_id) const;
@@ -37,6 +40,7 @@ public:
 
 private:
     std::vector<Observation> observations_;
+    std::unordered_map<KeyFrameId, std::unordered_set<MapPointId>> links_;
 };
 
 }  // namespace mini_vo

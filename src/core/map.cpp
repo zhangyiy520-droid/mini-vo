@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace mini_vo {
@@ -19,6 +21,54 @@ bool isPoseShapeValid(const cv::Mat& Rcw, const cv::Mat& tcw) {
            tcw.rows == 3 && tcw.cols == 1;
 }
 
+bool isKeyFrameValid(const KeyFrame& keyframe) {
+    return !keyframe.keypoints.empty() &&
+           !keyframe.descriptors.empty() &&
+           keyframe.descriptors.rows ==
+               static_cast<int>(keyframe.keypoints.size()) &&
+           isPoseShapeValid(keyframe.Rcw, keyframe.tcw);
+}
+
+bool isMapPointValid(const MapPoint& map_point) {
+    return isFinitePoint(map_point.position_world) &&
+           !map_point.descriptor.empty() &&
+           map_point.descriptor.rows == 1;
+}
+
+bool isObservationValidForKeyFrame(const Observation& observation,
+                                   const KeyFrame& keyframe) {
+    if (observation.feature_index >= keyframe.keypoints.size() ||
+        !std::isfinite(observation.pixel.x) ||
+        !std::isfinite(observation.pixel.y) ||
+        observation.octave < 0) {
+        return false;
+    }
+    return keyframe.image.empty() ||
+           (observation.pixel.x >= 0.0f &&
+            observation.pixel.y >= 0.0f &&
+            observation.pixel.x < keyframe.image.cols &&
+            observation.pixel.y < keyframe.image.rows);
+}
+
+struct ObservationLink {
+    KeyFrameId keyframe_id = 0;
+    MapPointId map_point_id = 0;
+
+    bool operator==(const ObservationLink& other) const {
+        return keyframe_id == other.keyframe_id &&
+               map_point_id == other.map_point_id;
+    }
+};
+
+struct ObservationLinkHash {
+    std::size_t operator()(const ObservationLink& link) const {
+        const std::size_t first = std::hash<KeyFrameId>{}(link.keyframe_id);
+        const std::size_t second = std::hash<MapPointId>{}(link.map_point_id);
+        return first ^ (second + 0x9e3779b9U + (first << 6U) +
+                        (first >> 2U));
+    }
+};
+
 }  // namespace
 
 bool TrackingMapSnapshot::valid() const {
@@ -27,11 +77,7 @@ bool TrackingMapSnapshot::valid() const {
 }
 
 bool Map::addKeyFrame(const KeyFrame& input) {
-    if (keyframes_.count(input.id) != 0 ||
-        input.keypoints.empty() ||
-        input.descriptors.empty() ||
-        input.descriptors.rows != static_cast<int>(input.keypoints.size()) ||
-        !isPoseShapeValid(input.Rcw, input.tcw)) {
+    if (keyframes_.count(input.id) != 0 || !isKeyFrameValid(input)) {
         return false;
     }
 
@@ -44,15 +90,28 @@ bool Map::addKeyFrame(const KeyFrame& input) {
 }
 
 bool Map::addMapPoint(const MapPoint& input) {
-    if (map_points_.count(input.id) != 0 ||
-        !isFinitePoint(input.position_world) ||
-        input.descriptor.empty() || input.descriptor.rows != 1) {
+    if (map_points_.count(input.id) != 0 || !isMapPointValid(input)) {
         return false;
     }
 
     MapPoint map_point = input;
     map_point.descriptor = input.descriptor.clone();
-    return map_points_.emplace(map_point.id, std::move(map_point)).second;
+    const auto inserted =
+        map_points_.emplace(map_point.id, std::move(map_point));
+    if (!inserted.second) {
+        return false;
+    }
+    if (inserted.first->second.bad) {
+        return true;
+    }
+    if (tracking_snapshot_valid_ &&
+        (tracking_snapshot_.map_point_ids.empty() ||
+         inserted.first->first > tracking_snapshot_.map_point_ids.back())) {
+        appendTrackingPoint(inserted.first->second);
+    } else {
+        tracking_snapshot_valid_ = false;
+    }
+    return true;
 }
 
 bool Map::addObservation(const Observation& observation) {
@@ -61,17 +120,65 @@ bool Map::addObservation(const Observation& observation) {
     if (keyframe == nullptr || map_point == nullptr || map_point->bad) {
         return false;
     }
-    if (observation.feature_index >= keyframe->keypoints.size()) {
+    if (!isObservationValidForKeyFrame(observation, *keyframe)) {
         return false;
     }
-    if (!keyframe->image.empty()) {
-        if (observation.pixel.x < 0.0f || observation.pixel.y < 0.0f ||
-            observation.pixel.x >= keyframe->image.cols ||
-            observation.pixel.y >= keyframe->image.rows) {
+    return observations_.add(observation);
+}
+
+bool Map::insertKeyFrameBatch(
+    const KeyFrame& input_keyframe,
+    const std::vector<MapPoint>& input_points,
+    const std::vector<Observation>& input_observations) {
+    if (keyframes_.count(input_keyframe.id) != 0 ||
+        !isKeyFrameValid(input_keyframe) || input_points.empty() ||
+        input_observations.empty()) {
+        return false;
+    }
+
+    std::unordered_map<MapPointId, const MapPoint*> batch_points;
+    batch_points.reserve(input_points.size());
+    for (const MapPoint& point : input_points) {
+        if (!isMapPointValid(point) || map_points_.count(point.id) != 0 ||
+            !batch_points.emplace(point.id, &point).second) {
             return false;
         }
     }
-    return observations_.add(observation);
+
+    std::unordered_set<ObservationLink, ObservationLinkHash> batch_links;
+    batch_links.reserve(input_observations.size());
+    for (const Observation& observation : input_observations) {
+        const KeyFrame* keyframe = observation.keyframe_id == input_keyframe.id
+                                       ? &input_keyframe
+                                       : findKeyFrame(observation.keyframe_id);
+        const auto batch_point = batch_points.find(observation.map_point_id);
+        const MapPoint* point = batch_point == batch_points.end()
+                                    ? findMapPoint(observation.map_point_id)
+                                    : batch_point->second;
+        const ObservationLink link{observation.keyframe_id,
+                                   observation.map_point_id};
+        if (keyframe == nullptr || point == nullptr || point->bad ||
+            !isObservationValidForKeyFrame(observation, *keyframe) ||
+            observations_.contains(link.keyframe_id, link.map_point_id) ||
+            !batch_links.insert(link).second) {
+            return false;
+        }
+    }
+
+    if (!addKeyFrame(input_keyframe)) {
+        return false;
+    }
+    for (const MapPoint& point : input_points) {
+        if (!addMapPoint(point)) {
+            return false;
+        }
+    }
+    for (const Observation& observation : input_observations) {
+        if (!addObservation(observation)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 KeyFrame* Map::findKeyFrame(KeyFrameId id) {
@@ -84,14 +191,36 @@ const KeyFrame* Map::findKeyFrame(KeyFrameId id) const {
     return it == keyframes_.end() ? nullptr : &it->second;
 }
 
-MapPoint* Map::findMapPoint(MapPointId id) {
+const MapPoint* Map::findMapPoint(MapPointId id) const {
     const auto it = map_points_.find(id);
     return it == map_points_.end() ? nullptr : &it->second;
 }
 
-const MapPoint* Map::findMapPoint(MapPointId id) const {
-    const auto it = map_points_.find(id);
-    return it == map_points_.end() ? nullptr : &it->second;
+bool Map::updateMapPointPosition(MapPointId id,
+                                 const cv::Point3d& position_world) {
+    if (!isFinitePoint(position_world)) {
+        return false;
+    }
+    const auto point = map_points_.find(id);
+    if (point == map_points_.end()) {
+        return false;
+    }
+    point->second.position_world = position_world;
+    if (point->second.bad) {
+        return true;
+    }
+    if (tracking_snapshot_valid_) {
+        const auto index = tracking_indices_.find(id);
+        if (index == tracking_indices_.end()) {
+            tracking_snapshot_valid_ = false;
+        } else {
+            tracking_snapshot_.points[index->second] = cv::Point3f(
+                static_cast<float>(position_world.x),
+                static_cast<float>(position_world.y),
+                static_cast<float>(position_world.z));
+        }
+    }
+    return true;
 }
 
 bool Map::eraseMapPoint(MapPointId id) {
@@ -102,6 +231,7 @@ bool Map::eraseMapPoint(MapPointId id) {
     for (const auto& observation : linked) {
         observations_.erase(observation.keyframe_id, observation.map_point_id);
     }
+    tracking_snapshot_valid_ = false;
     return true;
 }
 
@@ -115,8 +245,19 @@ const ObservationStore& Map::observations() const {
     return observations_;
 }
 
-TrackingMapSnapshot Map::trackingSnapshot() const {
-    TrackingMapSnapshot snapshot;
+void Map::appendTrackingPoint(const MapPoint& point) const {
+    tracking_indices_[point.id] = tracking_snapshot_.map_point_ids.size();
+    tracking_snapshot_.map_point_ids.push_back(point.id);
+    tracking_snapshot_.points.emplace_back(
+        static_cast<float>(point.position_world.x),
+        static_cast<float>(point.position_world.y),
+        static_cast<float>(point.position_world.z));
+    tracking_snapshot_.descriptors.push_back(point.descriptor);
+}
+
+void Map::rebuildTrackingSnapshot() const {
+    tracking_snapshot_ = TrackingMapSnapshot{};
+    tracking_indices_.clear();
     std::vector<MapPointId> ids;
     ids.reserve(map_points_.size());
     for (const auto& item : map_points_) {
@@ -126,18 +267,20 @@ TrackingMapSnapshot Map::trackingSnapshot() const {
     }
     std::sort(ids.begin(), ids.end());
 
-    snapshot.map_point_ids.reserve(ids.size());
-    snapshot.points.reserve(ids.size());
+    tracking_snapshot_.map_point_ids.reserve(ids.size());
+    tracking_snapshot_.points.reserve(ids.size());
+    tracking_indices_.reserve(ids.size());
     for (MapPointId id : ids) {
-        const MapPoint& point = map_points_.at(id);
-        snapshot.map_point_ids.push_back(id);
-        snapshot.points.emplace_back(
-            static_cast<float>(point.position_world.x),
-            static_cast<float>(point.position_world.y),
-            static_cast<float>(point.position_world.z));
-        snapshot.descriptors.push_back(point.descriptor);
+        appendTrackingPoint(map_points_.at(id));
     }
-    return snapshot;
+    tracking_snapshot_valid_ = true;
+}
+
+const TrackingMapSnapshot& Map::trackingSnapshot() const {
+    if (!tracking_snapshot_valid_) {
+        rebuildTrackingSnapshot();
+    }
+    return tracking_snapshot_;
 }
 
 std::size_t Map::keyFrameCount() const {

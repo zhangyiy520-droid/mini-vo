@@ -158,7 +158,7 @@ int main(int argc, char** argv)
 
     // --- 汇总 ---
     std::cout << "\n========== 完成 ==========" << std::endl;
-    const mini_vo::TrackingMapSnapshot final_map =
+    const mini_vo::TrackingMapSnapshot& final_map =
         vo.map.trackingSnapshot();
     std::cout << "地图点: " << final_map.points.size() << std::endl;
     std::cout << "轨迹: " << vo.trajectory_R.size() << "/" << files.size()

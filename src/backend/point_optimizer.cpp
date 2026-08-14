@@ -12,7 +12,7 @@ PointOptimizationReport PointOptimizer::optimize(
     const CameraIntrinsics& camera,
     const PointOptimizationOptions& options) const {
     PointOptimizationReport report;
-    MapPoint* map_point = map.findMapPoint(map_point_id);
+    const MapPoint* map_point = map.findMapPoint(map_point_id);
     if (map_point == nullptr || map_point->bad) {
         report.message = "map point not found or marked bad";
         return report;
@@ -58,8 +58,12 @@ PointOptimizationReport PointOptimizer::optimize(
     }
 
     const Eigen::Vector3d estimate = point_vertex->estimate();
-    map_point->position_world =
-        cv::Point3d(estimate.x(), estimate.y(), estimate.z());
+    if (!map.updateMapPointPosition(
+            map_point_id,
+            cv::Point3d(estimate.x(), estimate.y(), estimate.z()))) {
+        report.message = "optimized point could not be written back";
+        return report;
+    }
     report.success = true;
     report.message = "ok";
     return report;

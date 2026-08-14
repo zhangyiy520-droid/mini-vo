@@ -170,7 +170,7 @@ vo.frame_count - vo.last_keyframe >= 1
 
 匹配不足或 PnP 内点不足时返回失败，状态机进入 `LOST`。
 
-新点由 `triangulateNewPoints()` 生成。当前实现使用初始化关键帧作为固定参考，通过较大基线进行三角化；通过质量检查的新关键帧、地图点和两帧观测会以事务方式写入统一 `Map`。
+新点由 `triangulateNewPoints()` 生成。当前实现使用初始化关键帧作为固定参考，通过较大基线进行三角化；通过质量检查的新关键帧、地图点和两帧观测会先按批次校验，再原地写入统一 `Map`，不会复制历史地图。
 
 ## 8. 统一地图与前端缓存
 
@@ -183,7 +183,7 @@ vo.frame_count - vo.last_keyframe >= 1
 - 当前 `Map` 及关键帧/地图点 ID 分配状态；
 - 轨迹旋转、平移和时间戳。
 
-前端匹配通过 `Map::trackingSnapshot()` 获取稳定排序的 3D 点和 descriptor 行，不访问 Map 内部容器。
+前端匹配通过 `Map::trackingSnapshot()` 获取稳定排序的 3D 点和 descriptor 行，不访问 Map 内部容器；快照由 Map 增量维护并按引用返回，新增地图点时不再逐帧重建全部历史数据。
 
 ### 唯一地图事实源：`Map`
 

@@ -119,12 +119,12 @@ BundleAdjustmentReport BundleAdjuster::optimize(
         writeG2OPose(vertex->estimate(), *keyframe);
     }
     for (const auto& item : build.graph->point_vertex_ids) {
-        MapPoint* point = map.findMapPoint(item.first);
         const auto* vertex = dynamic_cast<const g2o::VertexPointXYZ*>(
             optimizer.vertex(item.second));
         const Eigen::Vector3d estimate = vertex->estimate();
-        point->position_world =
-            cv::Point3d(estimate.x(), estimate.y(), estimate.z());
+        map.updateMapPointPosition(
+            item.first,
+            cv::Point3d(estimate.x(), estimate.y(), estimate.z()));
     }
 
     report.success = true;

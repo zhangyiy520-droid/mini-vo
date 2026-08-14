@@ -46,8 +46,47 @@ int main() {
         return 1;
     }
 
+    mini_vo::Map single_view_map;
+    mini_vo::KeyFrame single_keyframe;
+    single_keyframe.id = 0;
+    single_keyframe.Rcw = cv::Mat::eye(3, 3, CV_64F);
+    single_keyframe.tcw = cv::Mat::zeros(3, 1, CV_64F);
+    single_keyframe.keypoints.emplace_back(cv::Point2f(), 1.0F);
+    single_keyframe.descriptors = cv::Mat::zeros(1, 32, CV_8U);
+    single_view_map.addKeyFrame(single_keyframe);
+
+    mini_vo::MapPoint single_view_point;
+    single_view_point.id = 10;
+    single_view_point.position_world =
+        truth + cv::Point3d(0.3, -0.2, 0.4);
+    single_view_point.descriptor = cv::Mat::zeros(1, 32, CV_8U);
+    const cv::Point3d original_position = single_view_point.position_world;
+    single_view_map.addMapPoint(single_view_point);
+
+    mini_vo::Observation single_observation;
+    single_observation.keyframe_id = single_keyframe.id;
+    single_observation.map_point_id = single_view_point.id;
+    single_observation.feature_index = 0;
+    single_observation.pixel = cv::Point2f(
+        static_cast<float>(camera.fx * truth.x / truth.z + camera.cx),
+        static_cast<float>(camera.fy * truth.y / truth.z + camera.cy));
+    single_view_map.addObservation(single_observation);
+
+    const mini_vo::PointOptimizationReport rejected_report =
+        mini_vo::PointOptimizer().optimize(
+            single_view_map, single_view_point.id, camera);
+    const cv::Point3d rejected_position =
+        single_view_map.findMapPoint(single_view_point.id)->position_world;
+    if (rejected_report.success ||
+        rejected_report.message != "point needs at least two observations" ||
+        cv::norm(rejected_position - original_position) != 0.0) {
+        std::cerr << "[FAIL] single-view point was not rejected cleanly\n";
+        return 1;
+    }
+
     std::cout << "[PASS] point chi2 " << report.initial_chi2
               << " -> " << report.final_chi2
-              << " position_error=" << error << '\n';
+              << " position_error=" << error
+              << " single_view_rejected=true\n";
     return 0;
 }
